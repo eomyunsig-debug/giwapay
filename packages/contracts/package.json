@@ -1,0 +1,16 @@
+{
+  "name": "@giwapay/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "forge build",
+    "clean": "forge clean",
+    "fmt": "forge fmt --check",
+    "fmt:write": "forge fmt",
+    "lint": "forge lint",
+    "test": "forge test --force",
+    "test:ci": "FOUNDRY_PROFILE=ci forge test --force -vvv",
+    "test:gas": "forge test --gas-report"
+  }
+}

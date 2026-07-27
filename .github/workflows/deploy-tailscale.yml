@@ -1,0 +1,163 @@
+name: Deploy GIWA Sepolia app over Tailscale
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: giwapay-giwa-sepolia
+  cancel-in-progress: false
+
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: giwa-sepolia
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.24
+        env:
+          POSTGRES_DB: giwapay_deploy_test
+          POSTGRES_USER: giwapay
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U giwapay -d giwapay_deploy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      FOUNDRY_PROFILE: ci
+      TEST_DATABASE_URL: postgresql://giwapay@127.0.0.1:5432/giwapay_deploy_test
+    outputs:
+      api_image: ${{ steps.images.outputs.api_image }}
+      web_image: ${{ steps.images.outputs.web_image }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --prod
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      - name: Validate public build configuration
+        env:
+          WEB_BASE_URL: ${{ vars.WEB_BASE_URL }}
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          GIWA_RPC_URL: ${{ vars.GIWA_RPC_URL }}
+          PAYMENT_ROUTER_ADDRESS: ${{ vars.PAYMENT_ROUTER_ADDRESS }}
+          MERCHANT_REGISTRY_ADDRESS: ${{ vars.MERCHANT_REGISTRY_ADDRESS }}
+        run: |
+          for name in WEB_BASE_URL PUBLIC_API_URL GIWA_RPC_URL PAYMENT_ROUTER_ADDRESS MERCHANT_REGISTRY_ADDRESS; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required GitHub environment variable: $name" >&2
+              exit 1
+            fi
+          done
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: images
+        name: Resolve immutable image names
+        shell: bash
+        run: |
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "api_image=ghcr.io/$owner/giwapay-api:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "web_image=ghcr.io/$owner/giwapay-web:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.api_image }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.web_image }}
+          build-args: |
+            NEXT_PUBLIC_APP_URL=${{ vars.WEB_BASE_URL }}
+            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL }}
+            NEXT_PUBLIC_GIWA_RPC_URL=${{ vars.GIWA_RPC_URL }}
+            NEXT_PUBLIC_GIWA_RPC_FALLBACK_URLS=${{ vars.GIWA_RPC_FALLBACK_URLS }}
+            NEXT_PUBLIC_GIWA_EXPLORER_URL=${{ vars.CHAIN_EXPLORER_URL }}
+            NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=${{ secrets.WALLETCONNECT_PROJECT_ID }}
+            NEXT_PUBLIC_ALLOW_TEST_CONTRACTS=false
+            NEXT_PUBLIC_PAYMENT_ROUTER_ADDRESS=${{ vars.PAYMENT_ROUTER_ADDRESS }}
+            NEXT_PUBLIC_MERCHANT_REGISTRY_ADDRESS=${{ vars.MERCHANT_REGISTRY_ADDRESS }}
+            NEXT_PUBLIC_PAYMENT_TOKENS_JSON=${{ vars.PAYMENT_TOKENS_JSON }}
+
+  deploy:
+    needs: verify-and-publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: giwa-sepolia
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Pull and start immutable release
+        env:
+          DEPLOY_TARGET: ${{ secrets.TS_DEPLOY_TARGET }}
+          DEPLOY_PATH: ${{ secrets.TS_DEPLOY_PATH }}
+          API_IMAGE: ${{ needs.verify-and-publish.outputs.api_image }}
+          WEB_IMAGE: ${{ needs.verify-and-publish.outputs.web_image }}
+        shell: bash
+        run: |
+          compose_hash="$(sha256sum docker-compose.prod.yml | cut -d ' ' -f1)"
+          tailscale ping --timeout=10s "$DEPLOY_TARGET"
+          tailscale ssh "$DEPLOY_TARGET" \
+            "cd '$DEPLOY_PATH' && printf '%s  %s\n' '$compose_hash' docker-compose.prod.yml | sha256sum --check --status"
+          tailscale ssh "$DEPLOY_TARGET" \
+            "cd '$DEPLOY_PATH' && GIWAPAY_API_IMAGE='$API_IMAGE' GIWAPAY_WEB_IMAGE='$WEB_IMAGE' docker compose --env-file .env.production -f docker-compose.prod.yml pull && GIWAPAY_API_IMAGE='$API_IMAGE' GIWAPAY_WEB_IMAGE='$WEB_IMAGE' docker compose --env-file .env.production -f docker-compose.prod.yml up -d --remove-orphans"
+
+      - name: Verify deployed API readiness
+        env:
+          READY_URL: ${{ vars.READY_URL }}
+        shell: bash
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 5 "$READY_URL" >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Deployment did not become ready." >&2
+          exit 1

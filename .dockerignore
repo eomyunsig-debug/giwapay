@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+!apps/api/.env.example
+.github
+.next
+.turbo
+coverage
+node_modules
+packages/contracts/broadcast
+packages/contracts/cache
+packages/contracts/lib
+packages/contracts/out
+playwright-report
+sources
+test-results

@@ -1,0 +1,286 @@
+name: CI
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Workspace verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.24
+        env:
+          POSTGRES_DB: giwapay_test
+          POSTGRES_USER: giwapay
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U giwapay -d giwapay_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      ALLOWED_ORIGINS: http://127.0.0.1:3000
+      CI: 'true'
+      DATABASE_URL: postgresql://giwapay@127.0.0.1:5432/giwapay_test
+      FOUNDRY_PROFILE: ci
+      TEST_DATABASE_URL: postgresql://giwapay@127.0.0.1:5432/giwapay_test
+      NODE_ENV: test
+      WEB_BASE_URL: http://127.0.0.1:3000
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Set up Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Generate ephemeral test secrets
+        shell: bash
+        run: |
+          session_secret="$(openssl rand -hex 32)"
+          api_key_pepper="$(openssl rand -hex 32)"
+          webhook_key="$(openssl rand -base64 32 | tr -d '\n')"
+          signer_key="0x$(openssl rand -hex 32)"
+          echo "::add-mask::$session_secret"
+          echo "::add-mask::$api_key_pepper"
+          echo "::add-mask::$webhook_key"
+          echo "::add-mask::$signer_key"
+          echo "SESSION_SECRET=$session_secret" >> "$GITHUB_ENV"
+          echo "API_KEY_PEPPER=$api_key_pepper" >> "$GITHUB_ENV"
+          echo "WEBHOOK_ENCRYPTION_KEY=$webhook_key" >> "$GITHUB_ENV"
+          echo "PAYMENT_INTENT_SIGNER_PRIVATE_KEY=$signer_key" >> "$GITHUB_ENV"
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod
+
+      - name: Apply database migrations
+        run: pnpm --filter @giwapay/db db:migrate
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  contracts-static-analysis:
+    name: Contracts static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install Slither
+        run: python -m pip install --disable-pip-version-check slither-analyzer==0.11.4
+
+      - name: Analyze contracts
+        working-directory: packages/contracts
+        run: slither . --config-file slither.config.json
+
+  anvil-integration:
+    name: Anvil payment flow integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: verify
+    services:
+      postgres:
+        image: postgres:18.4-alpine3.24
+        env:
+          POSTGRES_DB: giwapay_anvil_test
+          POSTGRES_USER: giwapay
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U giwapay -d giwapay_anvil_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      ANVIL_RPC_URL: http://127.0.0.1:8545
+      CI: 'true'
+      DATABASE_URL: postgresql://giwapay@127.0.0.1:5432/giwapay_anvil_test
+      NODE_ENV: test
+      RUN_ANVIL_INTEGRATION: 'true'
+      TEST_DATABASE_URL: postgresql://giwapay@127.0.0.1:5432/giwapay_anvil_test
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Set up Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Generate ephemeral integration secrets
+        shell: bash
+        run: |
+          session_secret="$(openssl rand -hex 32)"
+          api_key_pepper="$(openssl rand -hex 32)"
+          webhook_key="$(openssl rand -base64 32 | tr -d '\n')"
+          signer_key="0x$(openssl rand -hex 32)"
+          echo "::add-mask::$session_secret"
+          echo "::add-mask::$api_key_pepper"
+          echo "::add-mask::$webhook_key"
+          echo "::add-mask::$signer_key"
+          echo "SESSION_SECRET=$session_secret" >> "$GITHUB_ENV"
+          echo "API_KEY_PEPPER=$api_key_pepper" >> "$GITHUB_ENV"
+          echo "WEBHOOK_ENCRYPTION_KEY=$webhook_key" >> "$GITHUB_ENV"
+          echo "PAYMENT_INTENT_SIGNER_PRIVATE_KEY=$signer_key" >> "$GITHUB_ENV"
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build API workspace dependencies
+        run: pnpm --filter @giwapay/api... build
+
+      - name: Start local GIWA chain
+        shell: bash
+        run: |
+          anvil \
+            --host 127.0.0.1 \
+            --port 8545 \
+            --chain-id 91342 \
+            --quiet \
+            > "$RUNNER_TEMP/giwapay-anvil.log" 2>&1 &
+          for attempt in {1..30}; do
+            if cast chain-id --rpc-url "$ANVIL_RPC_URL" > /dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Anvil failed to start" >&2
+          exit 1
+
+      - name: Deploy local GiwaPay contracts
+        working-directory: packages/contracts
+        env:
+          DEPLOYER_ADDRESS: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+          PLATFORM_FEE_BPS: '50'
+          PLATFORM_FEE_RECIPIENT: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+        run: >-
+          forge script script/DeployLocal.s.sol:DeployLocal
+          --rpc-url "$ANVIL_RPC_URL"
+          --sender "$DEPLOYER_ADDRESS"
+          --unlocked
+          --broadcast
+
+      - name: Create integration deployment manifest
+        shell: bash
+        run: |
+          manifest_path="$RUNNER_TEMP/giwapay-anvil-deployment.json"
+          node scripts/extract-deployment.mjs \
+            packages/contracts/broadcast/DeployLocal.s.sol/91342/run-latest.json \
+            "$manifest_path" \
+            91342 \
+            local-anvil
+          echo "ANVIL_DEPLOYMENT_MANIFEST=$manifest_path" >> "$GITHUB_ENV"
+
+      - name: Apply integration database migrations
+        run: pnpm --filter @giwapay/db db:migrate
+
+      - name: Run verified payment flow
+        run: pnpm --filter @giwapay/api test:anvil
+
+  browser:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: verify
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @giwapay/web exec playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: pnpm test:e2e
