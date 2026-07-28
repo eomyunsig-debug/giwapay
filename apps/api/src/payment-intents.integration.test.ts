@@ -36,6 +36,7 @@ run('PaymentIntent route integration', () => {
   const signerAccount = privateKeyToAccount(signerPrivateKey);
   const onchainMerchants = new Map<string, OnchainMerchant>();
   let chainCalls = 0;
+  let chainHead = 100n;
   const config = loadConfig({
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
@@ -71,7 +72,7 @@ run('PaymentIntent route integration', () => {
   const chainClient = {
     getBlockNumber: async () => {
       chainCalls += 1;
-      return 100n;
+      return chainHead;
     },
     getChainId: async () => 91_342,
     readContract: async ({
@@ -238,6 +239,7 @@ run('PaymentIntent route integration', () => {
     const state = onchainMerchants.get(admin);
     if (!state) throw new Error('Missing on-chain merchant fixture');
     state.delegatedSigner = zeroAddress;
+    chainHead += 1n;
 
     const quote = await app.inject({
       method: 'GET',

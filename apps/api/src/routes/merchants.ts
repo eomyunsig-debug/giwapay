@@ -267,6 +267,7 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
 async function loadMerchantRegistration(
   services: AppServices,
   merchant: typeof merchants.$inferSelect,
+  blockNumber: bigint,
 ) {
   const registryAddress = services.config.MERCHANT_REGISTRY_ADDRESS;
   if (!registryAddress) {
@@ -282,17 +283,12 @@ async function loadMerchantRegistration(
     updatedAt: bigint;
   };
   try {
-    const head = await services.chainClient.getBlockNumber();
-    const confirmations = BigInt(services.config.CHAIN_CONFIRMATIONS);
-    if (head < confirmations) {
-      throw new Error('Chain has insufficient confirmed blocks');
-    }
     config = await services.chainClient.readContract({
       address: registryAddress,
       abi: merchantRegistryAbi,
       functionName: 'getMerchant',
       args: [merchant.onchainMerchantAddress as `0x${string}`],
-      blockNumber: head - confirmations,
+      blockNumber,
     });
   } catch {
     throw new HttpError(
@@ -354,13 +350,41 @@ async function loadMerchantRegistration(
 export function refreshMerchantRegistration(
   services: AppServices,
   merchant: typeof merchants.$inferSelect,
+): Promise<typeof merchants.$inferSelect> {
+  if (!services.config.MERCHANT_REGISTRY_ADDRESS) {
+    return Promise.reject(
+      new HttpError(503, 'merchant_registry_unavailable', 'MerchantRegistry is not configured'),
+    );
+  }
+  return refreshMerchantRegistrationAtConfirmedHead(services, merchant);
+}
+
+async function refreshMerchantRegistrationAtConfirmedHead(
+  services: AppServices,
+  merchant: typeof merchants.$inferSelect,
 ) {
+  let blockNumber: bigint;
+  try {
+    const head = await services.chainClient.getBlockNumber();
+    const confirmations = BigInt(services.config.CHAIN_CONFIRMATIONS);
+    if (head < confirmations) throw new Error('Chain has insufficient confirmed blocks');
+    blockNumber = head - confirmations;
+  } catch (error) {
+    throw new HttpError(
+      503,
+      'merchant_registry_read_failed',
+      'MerchantRegistry could not be verified',
+      { cause: error },
+    );
+  }
   let cache = merchantRegistrationCaches.get(services.chainClient);
   if (!cache) {
     cache = new AsyncTtlCache(10_000);
     merchantRegistrationCaches.set(services.chainClient, cache);
   }
-  return cache.get(merchant.onchainMerchantAddress, services.config.CHAIN_READ_CACHE_TTL_MS, () =>
-    loadMerchantRegistration(services, merchant),
+  return cache.get(
+    `${merchant.onchainMerchantAddress}:${blockNumber}`,
+    services.config.CHAIN_READ_CACHE_TTL_MS,
+    () => loadMerchantRegistration(services, merchant, blockNumber),
   );
 }
