@@ -1,0 +1,43 @@
+{
+  "name": "@giwapay/sdk",
+  "version": "0.1.0",
+  "description": "Typed TypeScript client and contract helpers for GiwaPay",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eomyunsig-debug/giwapay.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/eomyunsig-debug/giwapay/tree/main/packages/sdk",
+  "bugs": {
+    "url": "https://github.com/eomyunsig-debug/giwapay/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "viem": "2.55.10",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "6.0.2",
+    "vitest": "4.1.10"
+  }
+}

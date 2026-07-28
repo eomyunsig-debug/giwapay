@@ -1,0 +1,24 @@
+{
+  "name": "@giwapay/example-nextjs-store",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --port 3200",
+    "lint": "tsc --noEmit",
+    "test": "echo 'Example has no isolated tests; checkout behavior is covered by @giwapay/react and web E2E.'",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@giwapay/react": "workspace:*",
+    "next": "16.2.12",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.2"
+  }
+}

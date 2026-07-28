@@ -1,0 +1,53 @@
+{
+  "name": "@giwapay/react",
+  "version": "0.1.0",
+  "description": "React provider, hooks, and hosted checkout button for GiwaPay",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eomyunsig-debug/giwapay.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/eomyunsig-debug/giwapay/tree/main/packages/react",
+  "bugs": {
+    "url": "https://github.com/eomyunsig-debug/giwapay/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@giwapay/sdk": "workspace:*",
+    "@tanstack/react-query": "5.101.4"
+  },
+  "peerDependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "jsdom": "30.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "typescript": "6.0.2",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "giwapay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Non-custodial exact-settlement payment orchestration for GIWA",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eomyunsig-debug/giwapay.git"
+  },
+  "homepage": "https://giwapay-mvp.eomyunsig.chatgpt.site",
+  "bugs": {
+    "url": "https://github.com/eomyunsig-debug/giwapay/issues"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . && turbo run lint",
+    "test": "turbo run test",
+    "test:contracts": "pnpm --filter @giwapay/contracts test",
+    "test:e2e": "pnpm --filter @giwapay/web test:e2e",
+    "typecheck": "turbo run typecheck",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "demo:up": "./scripts/demo-up.sh",
+    "demo:down": "./scripts/demo-down.sh",
+    "deploy:giwa-sepolia": "./scripts/deploy-giwa-sepolia.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.6",
+    "turbo": "2.10.7",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.65.0"
+  }
+}

@@ -1,0 +1,20 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'examples/*'
+
+allowBuilds:
+  '@sentry/cli': true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true
+
+minimumReleaseAgeExclude:
+  - jsdom@30.0.0
+  - viem@2.55.10
+
+overrides:
+  '@fastify/static': 10.1.2
+  postcss: 8.5.23
+  sharp: 0.35.3
