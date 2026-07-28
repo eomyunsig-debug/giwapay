@@ -7,8 +7,9 @@ import { Card } from '@giwapay/ui';
 
 import { giwaPayClient } from '@/lib/api';
 import { getConfiguredToken } from '@/lib/config';
-import { formatDateTime, formatRawAmount, shortAddress } from '@/lib/format';
+import { formatConfiguredAmount, formatDateTime, shortAddress } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
 import { StatusBadge } from './status-badge';
 
 export function DashboardOverview() {
@@ -53,11 +54,17 @@ export function DashboardOverview() {
     <>
       <div className="page-heading">
         <div>
-          <h1>{merchant.data?.displayName ?? 'Merchant overview'}</h1>
-          <p>The latest 50 records below come from the chain-indexed database.</p>
+          <h1>
+            {merchant.data?.displayName ?? <Bilingual ko="판매자 개요" en="Merchant overview" />}
+          </h1>
+          <Bilingual
+            as="div"
+            ko="아래 최신 50개 기록은 체인 인덱싱 데이터베이스에서 가져옵니다."
+            en="The latest 50 records below come from the chain-indexed database."
+          />
         </div>
         <Link className="action-link action-link--primary" href="/dashboard/payment-links">
-          <Link2 size={15} /> Create payment link
+          <Link2 size={15} /> <Bilingual ko="결제 링크 만들기" en="Create payment link" />
         </Link>
       </div>
 
@@ -81,7 +88,9 @@ export function DashboardOverview() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Recent payment intents</h2>
+          <h2>
+            <Bilingual ko="최근 결제 요청" en="Recent payment intents" />
+          </h2>
           <span className="metric-caption">Auto-refreshes from API</span>
         </div>
         {items.length === 0 ? (
@@ -114,9 +123,9 @@ export function DashboardOverview() {
                     <span className="table-secondary">{intent.id}</span>
                   </td>
                   <td>
-                    {formatRawAmount(
+                    {formatConfiguredAmount(
                       intent.settlement.amount,
-                      getConfiguredToken(intent.settlement.token)?.decimals ?? 18,
+                      getConfiguredToken(intent.settlement.token),
                     )}{' '}
                     {getConfiguredToken(intent.settlement.token)?.symbol ??
                       shortAddress(intent.settlement.token)}

@@ -35,6 +35,7 @@ const paymentIntent = {
 };
 const merchantProfile = {
   id: '20000000-0000-4000-8000-000000000002',
+  onchainMerchantAddress: merchant,
   adminAddress: merchant,
   payoutAddress: recipient,
   delegatedSignerAddress: merchant,
@@ -45,6 +46,10 @@ const merchantProfile = {
   createdAt: '2026-07-28T00:00:00.000Z',
   updatedAt: '2026-07-28T00:00:00.000Z',
 };
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem('giwapay.locale', 'en'));
+});
 
 test('hosted checkout displays a live API-backed exact-output quote', async ({ page }) => {
   await page.route('http://127.0.0.1:3001/v1/payment-methods**', async (route) => {
@@ -125,6 +130,11 @@ test('hosted checkout displays a live API-backed exact-output quote', async ({ p
   await expect(page.getByText(recipient, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Connect wallet/i })).toBeVisible();
   await expect(page.getByText(/wallet submission is not a successful payment/i)).toBeVisible();
+
+  await page.getByRole('button', { name: '한국어로 전환' }).click();
+  await expect(page.getByText('판매자가 정확히 받는 금액')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '결제 상세' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '지갑 연결' })).toBeVisible();
 });
 
 test('landing page remains usable on a narrow mobile viewport', async ({ page }) => {

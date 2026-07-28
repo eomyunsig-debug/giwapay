@@ -2,9 +2,24 @@ import {
   createCipheriv,
   createDecipheriv,
   createHmac,
+  hkdfSync,
   randomBytes,
   timingSafeEqual,
 } from 'node:crypto';
+
+export type SessionPurpose = 'session-token' | 'csrf' | 'siwe-nonce' | 'quote-envelope';
+
+export function derivePurposeSecret(rootSecret: string, purpose: SessionPurpose): string {
+  return Buffer.from(
+    hkdfSync(
+      'sha256',
+      Buffer.from(rootSecret, 'utf8'),
+      Buffer.from('giwapay-session-root-v1', 'utf8'),
+      Buffer.from(`giwapay:${purpose}:v1`, 'utf8'),
+      32,
+    ),
+  ).toString('base64url');
+}
 
 export function randomToken(bytes = 32): string {
   return randomBytes(bytes).toString('base64url');

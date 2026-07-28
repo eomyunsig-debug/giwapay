@@ -12,6 +12,7 @@ import { Button, Card, Field, Input } from '@giwapay/ui';
 import { MERCHANT_REGISTRY_ADDRESS } from '@/lib/config';
 import { formatBasisPoints, shortAddress } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
 
 interface RecipientDraft {
   address: string;
@@ -217,7 +218,9 @@ export function SplitsPanel() {
     <>
       <div className="page-heading">
         <div>
-          <h1>Settlement splits</h1>
+          <h1>
+            <Bilingual ko="정산 분배" en="Settlement splits" />
+          </h1>
           <p>
             Register immutable recipient templates before referencing their splitId in a
             PaymentIntent.
@@ -235,7 +238,9 @@ export function SplitsPanel() {
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
-          <h2>Create immutable split template</h2>
+          <h2>
+            <Bilingual ko="불변 분배 템플릿 만들기" en="Create immutable split template" />
+          </h2>
           <span className="metric-caption">1–8 recipients · exactly 10,000 bps</span>
         </div>
         <form className="panel-body" onSubmit={create}>
@@ -329,7 +334,9 @@ export function SplitsPanel() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Onchain templates</h2>
+          <h2>
+            <Bilingual ko="온체인 템플릿" en="Onchain templates" />
+          </h2>
           <span className="metric-caption">Read directly from MerchantRegistry</span>
         </div>
         {splits.isLoading ? (

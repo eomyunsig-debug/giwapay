@@ -22,7 +22,8 @@
       deliveries, and process both payment and refund compensation events.
 - [ ] `ADAPTER_MANAGER_ADDRESS` is explicit; ownership acceptance revokes any
       manager permission retained by the previous owner.
-- [ ] `0000_initial.sql` is applied only to a fresh database, never as an in-place upgrade.
+- [ ] `0000_initial.sql` is applied only to a fresh database; every later
+      numbered migration is reviewed and backed up before an in-place upgrade.
 - [ ] Rate limits, CSP/security headers, log redaction and Sentry scrubbing are tested.
 - [ ] Restore, signer rotation, API-key revocation and emergency pause drills pass.
 - [ ] No mainnet RPC, production wallet key, official-token claim or unlabelled mock remains.

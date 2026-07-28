@@ -45,6 +45,7 @@ export const paymentRouterAbi = [
         components: [
           { name: 'intentId', type: 'bytes32' },
           { name: 'merchant', type: 'address' },
+          { name: 'signer', type: 'address' },
           { name: 'settlementToken', type: 'address' },
           { name: 'settlementAmount', type: 'uint256' },
           { name: 'splitId', type: 'bytes32' },
@@ -118,6 +119,41 @@ export const merchantRegistryAbi = [
   },
   {
     type: 'function',
+    name: 'merchantForAdmin',
+    stateMutability: 'view',
+    inputs: [{ name: 'admin', type: 'address' }],
+    outputs: [{ name: 'merchant', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'pendingAdmin',
+    stateMutability: 'view',
+    inputs: [{ name: 'merchant', type: 'address' }],
+    outputs: [{ name: 'admin', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'proposeAdmin',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'newAdmin', type: 'address' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'cancelAdminTransfer',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'acceptAdmin',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'merchant', type: 'address' }],
+    outputs: [],
+  },
+  {
+    type: 'function',
     name: 'createSplitTemplate',
     stateMutability: 'nonpayable',
     inputs: [
@@ -170,6 +206,7 @@ export const merchantRegistryAbi = [
 export interface RouterPaymentIntent {
   intentId: Hex;
   merchant: Address;
+  signer: Address;
   settlementToken: Address;
   settlementAmount: bigint;
   splitId: Hex;
@@ -208,6 +245,22 @@ export function encodeMerchantRegistration(args: {
     abi: merchantRegistryAbi,
     functionName: 'registerMerchant',
     args: [args.payoutAddress, args.delegatedSigner],
+  });
+}
+
+export function encodeProposeMerchantAdmin(newAdmin: Address): Hex {
+  return encodeFunctionData({
+    abi: merchantRegistryAbi,
+    functionName: 'proposeAdmin',
+    args: [newAdmin],
+  });
+}
+
+export function encodeAcceptMerchantAdmin(merchant: Address): Hex {
+  return encodeFunctionData({
+    abi: merchantRegistryAbi,
+    functionName: 'acceptAdmin',
+    args: [merchant],
   });
 }
 

@@ -3,8 +3,8 @@ pragma solidity 0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -26,12 +26,13 @@ contract PaymentRouter is EIP712, Ownable2Step, Pausable, ReentrancyGuard {
     uint256 public constant BASIS_POINTS = 10_000;
 
     bytes32 public constant PAYMENT_INTENT_TYPEHASH = keccak256(
-        "PaymentIntent(bytes32 intentId,address merchant,address settlementToken,uint256 settlementAmount,bytes32 splitId,bytes32 splitHash,uint256 platformFee,uint48 validAfter,uint48 expiresAt,address payer,bytes32 metadataHash)"
+        "PaymentIntent(bytes32 intentId,address merchant,address signer,address settlementToken,uint256 settlementAmount,bytes32 splitId,bytes32 splitHash,uint256 platformFee,uint48 validAfter,uint48 expiresAt,address payer,bytes32 metadataHash)"
     );
 
     struct PaymentIntent {
         bytes32 intentId;
         address merchant;
+        address signer;
         address settlementToken;
         uint256 settlementAmount;
         bytes32 splitId;
@@ -273,7 +274,7 @@ contract PaymentRouter is EIP712, Ownable2Step, Pausable, ReentrancyGuard {
         returns (address[] memory recipients, uint16[] memory basisPoints)
     {
         if (intent.intentId == bytes32(0)) revert InvalidIntentId();
-        if (intent.merchant == address(0) || intent.settlementToken == address(0)) {
+        if (intent.merchant == address(0) || intent.signer == address(0) || intent.settlementToken == address(0)) {
             revert ZeroAddress();
         }
         if (intent.settlementToken.code.length == 0) revert SettlementTokenHasNoCode();
@@ -292,8 +293,10 @@ contract PaymentRouter is EIP712, Ownable2Step, Pausable, ReentrancyGuard {
         uint256 requiredFee = Math.mulDiv(intent.settlementAmount, platformFeeBps, BASIS_POINTS, Math.Rounding.Ceil);
         if (intent.platformFee != requiredFee) revert InvalidPlatformFee();
 
-        address recoveredSigner = ECDSA.recover(hashPaymentIntent(intent), signature);
-        if (!merchantRegistry.isAuthorizedIntentSigner(intent.merchant, recoveredSigner)) {
+        if (
+            !merchantRegistry.isAuthorizedIntentSigner(intent.merchant, intent.signer)
+                || !SignatureChecker.isValidSignatureNow(intent.signer, hashPaymentIntent(intent), signature)
+        ) {
             revert InvalidIntentSignature();
         }
 
@@ -438,6 +441,7 @@ contract PaymentRouter is EIP712, Ownable2Step, Pausable, ReentrancyGuard {
                 PAYMENT_INTENT_TYPEHASH,
                 intent.intentId,
                 intent.merchant,
+                intent.signer,
                 intent.settlementToken,
                 intent.settlementAmount,
                 intent.splitId,

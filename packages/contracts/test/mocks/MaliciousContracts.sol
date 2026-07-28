@@ -4,7 +4,21 @@ pragma solidity 0.8.28;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {IExactOutputAdapter} from "../../src/interfaces/IExactOutputAdapter.sol";
+
+contract TestERC1271Signer is IERC1271 {
+    address public immutable owner;
+
+    constructor(address owner_) {
+        owner = owner_;
+    }
+
+    function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4) {
+        return ECDSA.recover(hash, signature) == owner ? IERC1271.isValidSignature.selector : bytes4(0xffffffff);
+    }
+}
 
 contract FeeOnTransferToken is ERC20 {
     uint256 public constant FEE_BPS = 100;

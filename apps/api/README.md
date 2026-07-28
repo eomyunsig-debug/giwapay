@@ -18,8 +18,9 @@ basisPoints))`. Changing a registered split after invoice creation therefore
 - Merchant registration is synchronized from a confirmed
   `MerchantRegistry.getMerchant` read. A submitted transaction hash is not
   accepted as proof of registration.
-- PaymentIntent signatures are created by the configured delegated signer. Its
-  private key is read only by the API process and is never returned or logged.
+- PaymentIntent signatures are created by the configured delegated signer.
+  Production uses a distinct non-exportable AWS KMS key per merchant; local
+  demo keys are never returned or logged.
 - API keys, SIWE nonces, sessions, and CSRF tokens are stored as peppered
   HMAC-SHA-256 digests. API-key authentication computes the complete presented
   key's digest and performs an indexed lookup; the retained prefix is display
@@ -33,10 +34,12 @@ pnpm --filter @giwapay/db db:migrate
 pnpm --filter @giwapay/api dev:server
 pnpm --filter @giwapay/api dev:indexer
 pnpm --filter @giwapay/api dev:webhooks
+pnpm --filter @giwapay/api dev:retention
 ```
 
-Run all three processes separately in production. The indexer uses a PostgreSQL
-advisory lock, so only one active instance advances the chain cursor. Webhook
+Run all four processes separately in production. The indexer and retention
+worker use distinct PostgreSQL advisory locks, so only one active instance of
+each advances its work. Webhook
 workers use row locks with `SKIP LOCKED` and may be scaled horizontally.
 
 ## Authentication
@@ -51,12 +54,13 @@ workers use row locks with `SKIP LOCKED` and may be scaled horizontally.
    scopes.
 
 Nonces expire quickly and are consumed atomically. SIWE domain, URI, wallet,
-origin, chain ID, issue/expiration time, and signature are verified.
+origin, chain ID, issue/expiration time, and signature are verified. Signature
+verification supports both EOAs and ERC-1271 contract wallets.
 
 ## Main routes
 
 - `GET /health`, `GET /ready`
-- `GET /openapi.json`, `/docs`
+- `GET /openapi.json`, `/docs` when `EXPOSE_API_DOCS=true`
 - `GET/PATCH /v1/merchants/me`
 - `POST /v1/merchants/me/registration/verify`
 - `GET/POST /v1/api-keys`, `DELETE /v1/api-keys/:id`

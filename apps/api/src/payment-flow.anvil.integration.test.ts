@@ -508,7 +508,10 @@ run('Anvil payment, indexer, webhook, and refund integration', () => {
       address: deployment.merchantRegistry,
       abi: merchantRegistryWriteAbi,
       functionName: 'registerMerchant',
-      args: [merchantAccount.address, services.intentSigner.address as Address],
+      args: [
+        merchantAccount.address,
+        services.intentSigner.addressForMerchant(merchantAccount.address) as Address,
+      ],
     });
     expect(
       (

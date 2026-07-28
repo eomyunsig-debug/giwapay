@@ -37,7 +37,8 @@ unreleased GIWA products or production integrations.
 ## Intent, finality, and refunds
 
 - A PaymentIntent is an EIP-712 payload signed by the merchant's currently
-  delegated signer. Settlement recipients are not signer-controlled: only a
+  delegated signer. The signed signer address may be an EOA or ERC-1271
+  contract wallet. Settlement recipients are not signer-controlled: only a
   registered split ID may be referenced, and the signature fixes its resolved
   recipient/bps snapshot through
   `splitHash = keccak256(abi.encode(recipients, basisPoints))`.
@@ -70,15 +71,22 @@ unreleased GIWA products or production integrations.
   single-use, and stored in PostgreSQL. Sessions use opaque, server-hashed,
   HTTP-only cookies plus origin checks and a CSRF token for
   cookie-authenticated mutations.
+- SIWE verifies ordinary EOA signatures first and falls back to an on-chain
+  ERC-1271 check for contract-wallet merchant admins.
 - API keys and session identifiers are stored as peppered HMAC-SHA-256 digests.
   API-key authentication hashes the complete presented key and performs an
   indexed digest lookup; the prefix is retained only for display. A newly
   created API key or webhook signing secret is shown once.
-- The delegated PaymentIntent signer is an operational hot key supplied only to
-  the API process through its environment or secret manager. The UI never
-  receives it. Rotation/revocation remains an on-chain merchant-admin action.
+- Production delegated PaymentIntent signing uses a distinct non-exportable
+  AWS KMS secp256k1 key handle per merchant. The API receives key identifiers
+  and expected addresses, not private keys. A shared extractable signer remains
+  available only for local/testnet demo operation and production rejects it.
+  Rotation/revocation remains an on-chain merchant-admin action.
 - One PostgreSQL database is sufficient for jobs. Workers claim rows with
-  locking and leases; Redis is intentionally not required.
+  locking and leases; Redis is intentionally not required. A separately
+  supervised retention worker prunes expired auth/session state, terminal old
+  webhooks, chain blocks outside the configured reorg safety window, and
+  expired distributed public-route limit buckets.
 - Local development uses Anvil's deterministic unlocked accounts without
   copying their keys into the repository. Those accounts are local-only and
   are never accepted by production configuration.

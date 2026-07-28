@@ -16,15 +16,23 @@ import {
   zeroBytes32,
 } from '../abi.js';
 import { authenticate, protectMutation } from '../auth.js';
+import { AsyncTtlCache } from '../cache.js';
 import { explorerTransactionUrl, normalizeAddress } from '../chain.js';
 import { decodeSignedPayload, encodeSignedPayload } from '../crypto.js';
+import { enforceDistributedRateLimit } from '../distributed-rate-limit.js';
 import type { SupportedPaymentToken } from '../env.js';
 import { HttpError } from '../errors.js';
 import { calculatePlatformFee } from '../fees.js';
-import { assertRouterConfiguration } from '../router-readiness.js';
+import { assertCachedRouterConfiguration } from '../router-readiness.js';
 import type { UnsignedPaymentIntent } from '../signer.js';
 import type { AppServices } from '../types.js';
 import { refreshMerchantRegistration } from './merchants.js';
+
+const quoteCaches = new WeakMap<object, AsyncTtlCache<Awaited<ReturnType<typeof loadQuote>>>>();
+const settlementCaches = new WeakMap<
+  object,
+  AsyncTtlCache<Awaited<ReturnType<typeof loadSettlementRecipients>>>
+>();
 
 const addressSchema = z
   .string()
@@ -184,6 +192,18 @@ function signedMerchant(intent: typeof paymentIntents.$inferSelect): `0x${string
   return result.data;
 }
 
+function signedSigner(intent: typeof paymentIntents.$inferSelect): `0x${string}` {
+  const result = addressSchema.safeParse(intent.typedData.message.signer);
+  if (!result.success || result.data !== intent.signerAddress) {
+    throw new HttpError(
+      500,
+      'payment_intent_corrupt',
+      'Stored PaymentIntent signer does not match its signed signer address',
+    );
+  }
+  return result.data;
+}
+
 function assertSplitMatches(
   intent: typeof paymentIntents.$inferSelect,
   recipients: readonly { address: string; basisPoints: number }[],
@@ -279,7 +299,7 @@ function findPaymentOption(
   return option;
 }
 
-async function calculateQuote(
+async function loadQuote(
   services: AppServices,
   intent: typeof paymentIntents.$inferSelect,
   tokenIn: `0x${string}`,
@@ -375,7 +395,25 @@ async function calculateQuote(
   };
 }
 
-async function getSettlementRecipients(
+async function calculateQuote(
+  services: AppServices,
+  intent: typeof paymentIntents.$inferSelect,
+  tokenIn: `0x${string}`,
+  requestedSlippageBps?: number,
+) {
+  let cache = quoteCaches.get(services.chainClient);
+  if (!cache) {
+    cache = new AsyncTtlCache(10_000);
+    quoteCaches.set(services.chainClient, cache);
+  }
+  return cache.get(
+    `${intent.id}:${tokenIn}:${requestedSlippageBps ?? 'default'}`,
+    services.config.CHAIN_READ_CACHE_TTL_MS,
+    () => loadQuote(services, intent, tokenIn, requestedSlippageBps),
+  );
+}
+
+async function loadSettlementRecipients(
   services: AppServices,
   merchantAddress: `0x${string}`,
   splitId: `0x${string}`,
@@ -420,6 +458,24 @@ async function getSettlementRecipients(
       'The settlement split is unavailable, disabled, or invalid on-chain',
     );
   }
+}
+
+async function getSettlementRecipients(
+  services: AppServices,
+  merchantAddress: `0x${string}`,
+  splitId: `0x${string}`,
+  requireEnabled = true,
+) {
+  let cache = settlementCaches.get(services.chainClient);
+  if (!cache) {
+    cache = new AsyncTtlCache(10_000);
+    settlementCaches.set(services.chainClient, cache);
+  }
+  return cache.get(
+    `${merchantAddress}:${splitId}:${requireEnabled}`,
+    services.config.CHAIN_READ_CACHE_TTL_MS,
+    () => loadSettlementRecipients(services, merchantAddress, splitId, requireEnabled),
+  );
 }
 
 export async function registerPaymentIntentRoutes(app: FastifyInstance, services: AppServices) {
@@ -476,7 +532,7 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
       const principal = request.principal;
       if (!principal) throw new Error('Authentication pre-handler did not run');
       const body = createBody.parse(request.body);
-      await assertRouterConfiguration(services);
+      await assertCachedRouterConfiguration(services);
       const headerKey = request.headers['idempotency-key'];
       if (typeof headerKey === 'string' && headerKey !== body.idempotencyKey) {
         throw new HttpError(
@@ -543,7 +599,7 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
       }
       const settlementRecipients = await getSettlementRecipients(
         services,
-        merchant.adminAddress as `0x${string}`,
+        merchant.onchainMerchantAddress as `0x${string}`,
         body.splitId,
       );
       const splitHash = calculateSplitHash(settlementRecipients);
@@ -577,13 +633,24 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
       const intentId = keccak256(
         encodePacked(
           ['address', 'string', 'bytes32'],
-          [merchant.adminAddress as `0x${string}`, body.idempotencyKey, createBytes32()],
+          [merchant.onchainMerchantAddress as `0x${string}`, body.idempotencyKey, createBytes32()],
         ),
       );
       const metadataHash = requestedMetadataHash;
+      const signerAddress = services.intentSigner.addressForMerchant(
+        merchant.onchainMerchantAddress,
+      );
+      if (!signerAddress) {
+        throw new HttpError(
+          503,
+          'intent_signer_unavailable',
+          'PaymentIntent signing is not configured for this merchant',
+        );
+      }
       const unsigned: UnsignedPaymentIntent = {
         intentId,
-        merchant: merchant.adminAddress as `0x${string}`,
+        merchant: merchant.onchainMerchantAddress as `0x${string}`,
+        signer: signerAddress,
         settlementToken: body.settlementToken,
         settlementAmount,
         splitId: body.splitId,
@@ -601,7 +668,8 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
         types: signed.types,
         message: {
           intentId,
-          merchant: merchant.adminAddress,
+          merchant: merchant.onchainMerchantAddress,
+          signer: signerAddress,
           settlementToken: body.settlementToken,
           settlementAmount: settlementAmount.toString(),
           splitId: body.splitId,
@@ -772,17 +840,30 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
         params: idParams,
         querystring: quoteQuery,
       },
+      config: {
+        rateLimit: {
+          max: services.config.QUOTE_RATE_LIMIT_MAX,
+          timeWindow: '1 minute',
+          keyGenerator: (request) =>
+            `${request.ip}:${String((request.params as { id?: string }).id ?? 'invalid')}`,
+        },
+      },
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
+      await enforceDistributedRateLimit(services, {
+        scope: 'quote',
+        identity: `${request.ip}:${id}`,
+        maximum: services.config.QUOTE_RATE_LIMIT_MAX,
+      });
       const query = quoteQuery.parse(request.query);
       const intent = await getPayableIntent(services, id);
-      await assertRouterConfiguration(services);
+      await assertCachedRouterConfiguration(services);
       const merchant = await getActiveIntentMerchant(services, intent);
       const quote = await calculateQuote(services, intent, query.tokenIn, query.slippageBps);
       const recipients = await getSettlementRecipients(
         services,
-        merchant.adminAddress as `0x${string}`,
+        merchant.onchainMerchantAddress as `0x${string}`,
         intent.splitId as `0x${string}`,
       );
       assertSplitMatches(intent, recipients);
@@ -799,15 +880,26 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
         params: idParams,
         body: prepareBody,
       },
+      config: {
+        rateLimit: {
+          max: services.config.PREPARE_RATE_LIMIT_MAX,
+          timeWindow: '1 minute',
+          keyGenerator: (request) =>
+            `${request.ip}:${String((request.params as { id?: string }).id ?? 'invalid')}`,
+        },
+      },
     },
     async (request) => {
       const { id } = idParams.parse(request.params);
+      await enforceDistributedRateLimit(services, {
+        scope: 'prepare',
+        identity: `${request.ip}:${id}`,
+        maximum: services.config.PREPARE_RATE_LIMIT_MAX,
+      });
       const body = prepareBody.parse(request.body);
       const intent = await getPayableIntent(services, id);
-      await assertRouterConfiguration(services);
-      const merchant = await getActiveIntentMerchant(services, intent);
       const envelopeResult = quoteEnvelopeSchema.safeParse(
-        decodeSignedPayload(body.quoteId, services.config.SESSION_SECRET),
+        decodeSignedPayload(body.quoteId, services.config.sessionSecrets.quoteEnvelope),
       );
       if (!envelopeResult.success) {
         throw new HttpError(
@@ -830,10 +922,12 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
           'Quote expired or does not match this payment request',
         );
       }
+      await assertCachedRouterConfiguration(services);
+      const merchant = await getActiveIntentMerchant(services, intent);
       const quote = await calculateQuote(services, intent, body.tokenIn, envelope.slippageBps);
       const recipients = await getSettlementRecipients(
         services,
-        merchant.adminAddress as `0x${string}`,
+        merchant.onchainMerchantAddress as `0x${string}`,
         intent.splitId as `0x${string}`,
       );
       assertSplitMatches(intent, recipients);
@@ -866,6 +960,7 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
           {
             intentId: message.intentId as `0x${string}`,
             merchant: message.merchant as `0x${string}`,
+            signer: signedSigner(intent),
             settlementToken: message.settlementToken as `0x${string}`,
             settlementAmount: BigInt(String(message.settlementAmount)),
             splitId: message.splitId as `0x${string}`,
@@ -930,7 +1025,7 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
       if (!intent) {
         throw new HttpError(404, 'payment_intent_not_found', 'PaymentIntent was not found');
       }
-      await assertRouterConfiguration(services);
+      await assertCachedRouterConfiguration(services);
       if (intent.routerAddress !== services.config.PAYMENT_ROUTER_ADDRESS) {
         throw new HttpError(
           409,
@@ -1106,7 +1201,7 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
           'Only a pending refund request can be resumed',
         );
       }
-      await assertRouterConfiguration(services);
+      await assertCachedRouterConfiguration(services);
       return buildRefundResponse(row.intent, row.refund);
     },
   );
@@ -1142,7 +1237,11 @@ async function getActiveIntentMerchant(
     .limit(1);
   if (!stored) throw new Error('PaymentIntent merchant was not found');
   const merchant = await refreshMerchantRegistration(services, stored);
-  if (merchant.status !== 'active' || merchant.delegatedSignerAddress !== intent.signerAddress) {
+  if (
+    merchant.status !== 'active' ||
+    merchant.delegatedSignerAddress !== intent.signerAddress ||
+    signedSigner(intent) !== merchant.delegatedSignerAddress
+  ) {
     throw new HttpError(
       409,
       'payment_intent_authorization_revoked',
@@ -1178,7 +1277,7 @@ function issueQuote(
     quotedAt,
     expiresAt,
   };
-  const quoteId = encodeSignedPayload(envelope, services.config.SESSION_SECRET);
+  const quoteId = encodeSignedPayload(envelope, services.config.sessionSecrets.quoteEnvelope);
   return serializeQuoteEnvelope(intent, envelope, quoteId);
 }
 

@@ -184,6 +184,86 @@ contract MerchantRegistryTest is Test {
         assertTrue(registry.isAuthorizedIntentSigner(merchant, signer));
     }
 
+    function test_TwoStepAdminRotationPreservesStableMerchantIdentity() public {
+        _register();
+        address newAdmin = makeAddr("newAdmin");
+        bytes32 splitId = keccak256("stable-split");
+        address[] memory recipients = new address[](1);
+        recipients[0] = payout;
+        uint16[] memory bps = new uint16[](1);
+        bps[0] = 10_000;
+
+        vm.startPrank(merchant);
+        registry.createSplitTemplate(splitId, recipients, bps);
+        registry.proposeAdmin(newAdmin);
+        vm.stopPrank();
+
+        assertEq(registry.merchantForAdmin(merchant), merchant);
+        assertEq(registry.pendingAdmin(merchant), newAdmin);
+        assertEq(registry.merchantForAdmin(newAdmin), address(0));
+
+        vm.prank(newAdmin);
+        registry.acceptAdmin(merchant);
+
+        IMerchantRegistry.Merchant memory record = registry.getMerchant(merchant);
+        assertEq(record.admin, newAdmin);
+        assertEq(registry.merchantForAdmin(merchant), address(0));
+        assertEq(registry.merchantForAdmin(newAdmin), merchant);
+        assertEq(registry.pendingAdmin(merchant), address(0));
+        assertTrue(registry.isAuthorizedIntentSigner(merchant, signer));
+        (address[] memory storedRecipients, uint16[] memory storedBps, bool enabled) =
+            registry.getSplitTemplate(merchant, splitId);
+        assertTrue(enabled);
+        assertEq(storedRecipients[0], payout);
+        assertEq(storedBps[0], 10_000);
+
+        vm.prank(merchant);
+        vm.expectRevert(MerchantRegistry.MerchantNotRegistered.selector);
+        registry.pauseMerchant();
+
+        vm.prank(newAdmin);
+        registry.pauseMerchant();
+        assertFalse(registry.isAuthorizedIntentSigner(merchant, signer));
+        assertTrue(registry.isAuthorizedRefundOperator(merchant, newAdmin));
+        assertFalse(registry.isAuthorizedRefundOperator(merchant, merchant));
+    }
+
+    function test_AdminTransferRequiresExplicitAcceptanceAndCanBeCancelled() public {
+        _register();
+        address newAdmin = makeAddr("newAdmin");
+        address attacker = makeAddr("attacker");
+
+        vm.prank(merchant);
+        registry.proposeAdmin(newAdmin);
+
+        vm.prank(attacker);
+        vm.expectRevert(MerchantRegistry.UnauthorizedPendingAdmin.selector);
+        registry.acceptAdmin(merchant);
+
+        vm.prank(merchant);
+        registry.cancelAdminTransfer();
+        assertEq(registry.pendingAdmin(merchant), address(0));
+
+        vm.prank(newAdmin);
+        vm.expectRevert(MerchantRegistry.UnauthorizedPendingAdmin.selector);
+        registry.acceptAdmin(merchant);
+    }
+
+    function test_AdminTransferRejectsSignerAndAdminsControllingAnotherMerchant() public {
+        _register();
+        vm.prank(merchant);
+        vm.expectRevert(MerchantRegistry.RoleSeparationRequired.selector);
+        registry.proposeAdmin(signer);
+
+        address secondMerchant = makeAddr("secondMerchant");
+        vm.prank(secondMerchant);
+        registry.registerMerchant(makeAddr("secondPayout"), makeAddr("secondSigner"));
+
+        vm.prank(merchant);
+        vm.expectRevert(MerchantRegistry.AdminAlreadyControlsMerchant.selector);
+        registry.proposeAdmin(secondMerchant);
+    }
+
     function _register() private {
         vm.prank(merchant);
         registry.registerMerchant(payout, signer);

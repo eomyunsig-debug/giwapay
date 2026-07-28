@@ -169,6 +169,7 @@ run('SIWE integration', () => {
     const [merchant] = await database.db
       .insert(merchants)
       .values({
+        onchainMerchantAddress: merchantAddress,
         adminAddress: merchantAddress,
         payoutAddress: merchantAddress,
         status: 'active',
@@ -206,6 +207,7 @@ run('SIWE integration', () => {
           types: { PaymentIntent: [] },
           message: {
             merchant: merchantAddress,
+            signer: merchantAddress,
             splitHash: hash('c'),
           },
         },

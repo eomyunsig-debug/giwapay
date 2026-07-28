@@ -1,7 +1,13 @@
 import { paymentRouterAbi } from './abi.js';
+import { AsyncTtlCache } from './cache.js';
 import { normalizeAddress } from './chain.js';
 import { HttpError } from './errors.js';
 import type { AppServices } from './types.js';
+
+const configurationCaches = new WeakMap<
+  object,
+  AsyncTtlCache<Awaited<ReturnType<typeof readRouterConfiguration>>>
+>();
 
 export async function readRouterConfiguration(services: AppServices) {
   const router = services.config.PAYMENT_ROUTER_ADDRESS;
@@ -61,4 +67,17 @@ export async function assertRouterConfiguration(services: AppServices) {
     );
   }
   return configuration;
+}
+
+export async function assertCachedRouterConfiguration(services: AppServices) {
+  let cache = configurationCaches.get(services.chainClient);
+  if (!cache) {
+    cache = new AsyncTtlCache(1);
+    configurationCaches.set(services.chainClient, cache);
+  }
+  return cache.get(
+    'immutable-router-configuration',
+    services.config.ROUTER_CONFIGURATION_CACHE_TTL_MS,
+    () => assertRouterConfiguration(services),
+  );
 }

@@ -18,6 +18,7 @@ contract PaymentRouterHandler is Test {
     MockKRW public immutable token;
     address public immutable merchant;
     address public immutable payout;
+    address public immutable signer;
     uint256 public immutable signerPrivateKey;
 
     bytes32[] private _intentIds;
@@ -35,6 +36,7 @@ contract PaymentRouterHandler is Test {
         merchant = merchant_;
         payout = payout_;
         signerPrivateKey = signerPrivateKey_;
+        signer = vm.addr(signerPrivateKey_);
         token_.approve(address(router_), type(uint256).max);
     }
 
@@ -52,6 +54,7 @@ contract PaymentRouterHandler is Test {
         PaymentRouter.PaymentIntent memory intent = PaymentRouter.PaymentIntent({
             intentId: intentId,
             merchant: merchant,
+            signer: signer,
             settlementToken: address(token),
             settlementAmount: amount,
             splitId: bytes32(0),

@@ -22,6 +22,8 @@ contract MerchantRegistry is IMerchantRegistry {
     mapping(address merchant => Merchant record) private _merchants;
     mapping(address merchant => mapping(bytes32 splitId => SplitTemplate template)) private _splits;
     mapping(address merchant => bytes32[] splitIds) private _splitIds;
+    mapping(address admin => address merchant) private _merchantForAdmin;
+    mapping(address merchant => address pendingAdmin) private _pendingAdmins;
 
     error AlreadyRegistered();
     error MerchantNotRegistered();
@@ -40,6 +42,10 @@ contract MerchantRegistry is IMerchantRegistry {
     error ZeroBasisPoints();
     error InvalidBasisPointsTotal();
     error DuplicateRecipient();
+    error AdminTransferAlreadyPending();
+    error AdminTransferNotPending();
+    error AdminAlreadyControlsMerchant();
+    error UnauthorizedPendingAdmin();
 
     event MerchantRegistered(
         address indexed merchant, address indexed payoutAddress, address indexed delegatedSigner, uint64 registeredAt
@@ -57,19 +63,29 @@ contract MerchantRegistry is IMerchantRegistry {
         address indexed merchant, bytes32 indexed splitId, address[] recipients, uint16[] basisPoints
     );
     event SplitTemplateDisabled(address indexed merchant, bytes32 indexed splitId);
+    event MerchantAdminTransferProposed(
+        address indexed merchant, address indexed currentAdmin, address indexed pendingAdmin
+    );
+    event MerchantAdminTransferCancelled(
+        address indexed merchant, address indexed currentAdmin, address indexed cancelledAdmin
+    );
+    event MerchantAdminTransferred(address indexed merchant, address indexed previousAdmin, address indexed newAdmin);
 
     modifier onlyMerchantAdmin() {
-        Merchant storage merchant = _merchants[msg.sender];
-        if (merchant.admin == address(0)) revert MerchantNotRegistered();
-        if (merchant.admin != msg.sender) revert UnauthorizedMerchantAdmin();
+        address merchantId = _merchantForAdmin[msg.sender];
+        if (merchantId == address(0)) revert MerchantNotRegistered();
+        if (_merchants[merchantId].admin != msg.sender) revert UnauthorizedMerchantAdmin();
         _;
     }
 
     /// @notice Registers the caller as a merchant admin.
     /// @param payoutAddress Address that receives the default 100% split.
-    /// @param delegatedSigner Dedicated EOA that signs EIP-712 payment intents.
+    /// @param delegatedSigner Dedicated EOA or ERC-1271 contract that signs
+    /// EIP-712 payment intents.
     function registerMerchant(address payoutAddress, address delegatedSigner) external {
-        if (_merchants[msg.sender].admin != address(0)) revert AlreadyRegistered();
+        if (_merchantForAdmin[msg.sender] != address(0) || _merchants[msg.sender].admin != address(0)) {
+            revert AlreadyRegistered();
+        }
         if (payoutAddress == address(0) || delegatedSigner == address(0)) revert ZeroAddress();
         if (delegatedSigner == msg.sender || delegatedSigner == payoutAddress) {
             revert RoleSeparationRequired();
@@ -85,83 +101,137 @@ contract MerchantRegistry is IMerchantRegistry {
             createdAt: timestamp,
             updatedAt: timestamp
         });
+        _merchantForAdmin[msg.sender] = msg.sender;
 
         emit MerchantRegistered(msg.sender, payoutAddress, delegatedSigner, timestamp);
+    }
+
+    /// @notice Proposes a new admin while preserving the stable merchant
+    /// identity used by signed intents, splits, payments, and refunds.
+    /// @dev This is a planned two-step rotation, not a lost-key recovery path.
+    function proposeAdmin(address newAdmin) external onlyMerchantAdmin {
+        address merchantId = _merchantForAdmin[msg.sender];
+        if (newAdmin == address(0)) revert ZeroAddress();
+        if (newAdmin == msg.sender) revert AdminAlreadyControlsMerchant();
+        if (_merchantForAdmin[newAdmin] != address(0) || _merchants[newAdmin].admin != address(0)) {
+            revert AdminAlreadyControlsMerchant();
+        }
+        Merchant storage merchant = _merchants[merchantId];
+        if (newAdmin == merchant.delegatedSigner) revert RoleSeparationRequired();
+        if (_pendingAdmins[merchantId] != address(0)) revert AdminTransferAlreadyPending();
+        _pendingAdmins[merchantId] = newAdmin;
+        merchant.updatedAt = uint64(block.timestamp);
+        emit MerchantAdminTransferProposed(merchantId, msg.sender, newAdmin);
+    }
+
+    /// @notice Cancels an unaccepted admin transfer.
+    function cancelAdminTransfer() external onlyMerchantAdmin {
+        address merchantId = _merchantForAdmin[msg.sender];
+        address pending = _pendingAdmins[merchantId];
+        if (pending == address(0)) revert AdminTransferNotPending();
+        delete _pendingAdmins[merchantId];
+        _merchants[merchantId].updatedAt = uint64(block.timestamp);
+        emit MerchantAdminTransferCancelled(merchantId, msg.sender, pending);
+    }
+
+    /// @notice Accepts admin control for a stable merchant identity.
+    function acceptAdmin(address merchantId) external {
+        if (_pendingAdmins[merchantId] != msg.sender) revert UnauthorizedPendingAdmin();
+        if (_merchantForAdmin[msg.sender] != address(0) || _merchants[msg.sender].admin != address(0)) {
+            revert AdminAlreadyControlsMerchant();
+        }
+        Merchant storage merchant = _merchants[merchantId];
+        if (merchant.admin == address(0)) revert MerchantNotRegistered();
+        if (msg.sender == merchant.delegatedSigner) revert RoleSeparationRequired();
+        address previous = merchant.admin;
+        delete _merchantForAdmin[previous];
+        delete _pendingAdmins[merchantId];
+        _merchantForAdmin[msg.sender] = merchantId;
+        merchant.admin = msg.sender;
+        merchant.updatedAt = uint64(block.timestamp);
+        emit MerchantAdminTransferred(merchantId, previous, msg.sender);
     }
 
     /// @notice Updates the recipient of the default split.
     function updatePayoutAddress(address newPayoutAddress) external onlyMerchantAdmin {
         if (newPayoutAddress == address(0)) revert ZeroAddress();
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         if (newPayoutAddress == merchant.delegatedSigner) revert RoleSeparationRequired();
         address previous = merchant.payoutAddress;
         merchant.payoutAddress = newPayoutAddress;
         merchant.updatedAt = uint64(block.timestamp);
-        emit PayoutAddressUpdated(msg.sender, previous, newPayoutAddress);
+        emit PayoutAddressUpdated(merchantId, previous, newPayoutAddress);
     }
 
     /// @notice Replaces the dedicated payment-intent signer.
     function rotateDelegatedSigner(address newSigner) external onlyMerchantAdmin {
         if (newSigner == address(0)) revert ZeroAddress();
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         if (newSigner == msg.sender || newSigner == merchant.payoutAddress || newSigner == merchant.refundOperator) {
             revert RoleSeparationRequired();
         }
         address previous = merchant.delegatedSigner;
         merchant.delegatedSigner = newSigner;
         merchant.updatedAt = uint64(block.timestamp);
-        emit DelegatedSignerRotated(msg.sender, previous, newSigner);
+        emit DelegatedSignerRotated(merchantId, previous, newSigner);
     }
 
     /// @notice Revokes the delegated signer and invalidates all unsigned or
     /// pending intents from that signer.
     function revokeDelegatedSigner() external onlyMerchantAdmin {
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         address previous = merchant.delegatedSigner;
         if (previous == address(0)) revert SignerAlreadyRevoked();
         merchant.delegatedSigner = address(0);
         merchant.updatedAt = uint64(block.timestamp);
-        emit DelegatedSignerRevoked(msg.sender, previous);
+        emit DelegatedSignerRevoked(merchantId, previous);
     }
 
     /// @notice Sets an optional operator that may initiate merchant-funded
     /// refunds. The operator cannot modify any other merchant setting.
     function setRefundOperator(address newOperator) external onlyMerchantAdmin {
         if (newOperator == address(0)) revert ZeroAddress();
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         if (newOperator == merchant.delegatedSigner) revert RoleSeparationRequired();
         address previous = merchant.refundOperator;
         merchant.refundOperator = newOperator;
         merchant.updatedAt = uint64(block.timestamp);
-        emit RefundOperatorUpdated(msg.sender, previous, newOperator);
+        emit RefundOperatorUpdated(merchantId, previous, newOperator);
     }
 
     /// @notice Revokes the current refund operator.
     function revokeRefundOperator() external onlyMerchantAdmin {
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         address previous = merchant.refundOperator;
         if (previous == address(0)) revert RefundOperatorAlreadyRevoked();
         merchant.refundOperator = address(0);
         merchant.updatedAt = uint64(block.timestamp);
-        emit RefundOperatorUpdated(msg.sender, previous, address(0));
+        emit RefundOperatorUpdated(merchantId, previous, address(0));
     }
 
     /// @notice Pauses new payments for the caller's merchant account.
     function pauseMerchant() external onlyMerchantAdmin {
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         if (!merchant.active) revert MerchantAlreadyPaused();
         merchant.active = false;
         merchant.updatedAt = uint64(block.timestamp);
-        emit MerchantStatusChanged(msg.sender, false);
+        emit MerchantStatusChanged(merchantId, false);
     }
 
     /// @notice Re-enables new payments for the caller's merchant account.
     function reactivateMerchant() external onlyMerchantAdmin {
-        Merchant storage merchant = _merchants[msg.sender];
+        address merchantId = _merchantForAdmin[msg.sender];
+        Merchant storage merchant = _merchants[merchantId];
         if (merchant.active) revert MerchantAlreadyActive();
         merchant.active = true;
         merchant.updatedAt = uint64(block.timestamp);
-        emit MerchantStatusChanged(msg.sender, true);
+        emit MerchantStatusChanged(merchantId, true);
     }
 
     /// @notice Creates an immutable settlement split.
@@ -172,8 +242,9 @@ contract MerchantRegistry is IMerchantRegistry {
         external
         onlyMerchantAdmin
     {
+        address merchantId = _merchantForAdmin[msg.sender];
         if (splitId == DEFAULT_SPLIT_ID) revert ReservedSplitId();
-        if (_splits[msg.sender][splitId].exists) revert SplitAlreadyExists();
+        if (_splits[merchantId][splitId].exists) revert SplitAlreadyExists();
 
         uint256 length = recipients.length;
         if (length == 0 || length > MAX_SPLIT_RECIPIENTS || length != basisPoints.length) {
@@ -191,31 +262,42 @@ contract MerchantRegistry is IMerchantRegistry {
         }
         if (total != BASIS_POINTS) revert InvalidBasisPointsTotal();
 
-        SplitTemplate storage split = _splits[msg.sender][splitId];
+        SplitTemplate storage split = _splits[merchantId][splitId];
         split.recipients = recipients;
         split.basisPoints = basisPoints;
         split.enabled = true;
         split.exists = true;
-        _splitIds[msg.sender].push(splitId);
-        _merchants[msg.sender].updatedAt = uint64(block.timestamp);
+        _splitIds[merchantId].push(splitId);
+        _merchants[merchantId].updatedAt = uint64(block.timestamp);
 
-        emit SplitTemplateCreated(msg.sender, splitId, recipients, basisPoints);
+        emit SplitTemplateCreated(merchantId, splitId, recipients, basisPoints);
     }
 
     /// @notice Permanently disables a split template.
     function disableSplitTemplate(bytes32 splitId) external onlyMerchantAdmin {
+        address merchantId = _merchantForAdmin[msg.sender];
         if (splitId == DEFAULT_SPLIT_ID) revert ReservedSplitId();
-        SplitTemplate storage split = _splits[msg.sender][splitId];
+        SplitTemplate storage split = _splits[merchantId][splitId];
         if (!split.exists) revert SplitNotFound();
         if (!split.enabled) revert SplitAlreadyDisabled();
         split.enabled = false;
-        _merchants[msg.sender].updatedAt = uint64(block.timestamp);
-        emit SplitTemplateDisabled(msg.sender, splitId);
+        _merchants[merchantId].updatedAt = uint64(block.timestamp);
+        emit SplitTemplateDisabled(merchantId, splitId);
     }
 
     /// @inheritdoc IMerchantRegistry
     function getMerchant(address merchant) external view returns (Merchant memory) {
         return _merchants[merchant];
+    }
+
+    /// @inheritdoc IMerchantRegistry
+    function merchantForAdmin(address admin) external view returns (address) {
+        return _merchantForAdmin[admin];
+    }
+
+    /// @inheritdoc IMerchantRegistry
+    function pendingAdmin(address merchant) external view returns (address) {
+        return _pendingAdmins[merchant];
     }
 
     /// @notice Returns the number of custom (non-default) split templates a

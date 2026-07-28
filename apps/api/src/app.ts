@@ -129,11 +129,13 @@ export async function buildApp(services: AppServices) {
     },
     transform: jsonSchemaTransform,
   });
-  await app.register(swaggerUi, {
-    routePrefix: '/docs',
-    uiConfig: { docExpansion: 'list', deepLinking: true },
-    staticCSP: true,
-  });
+  if (services.config.exposeApiDocs) {
+    await app.register(swaggerUi, {
+      routePrefix: '/docs',
+      uiConfig: { docExpansion: 'list', deepLinking: true },
+      staticCSP: true,
+    });
+  }
 
   app.get(
     '/health',
@@ -172,7 +174,7 @@ export async function buildApp(services: AppServices) {
       } catch {
         checks.chain = 'unavailable';
       }
-      checks.intentSigner = services.intentSigner.address ? 'ok' : 'unconfigured';
+      checks.intentSigner = (await services.intentSigner.readiness()) ? 'ok' : 'unconfigured';
       try {
         const router = await readRouterConfiguration(services);
         checks.routerConfiguration = router.matches ? 'ok' : 'mismatch';
@@ -185,7 +187,9 @@ export async function buildApp(services: AppServices) {
     },
   );
 
-  app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
+  if (services.config.exposeApiDocs) {
+    app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
+  }
 
   await registerAuthRoutes(app, services);
   await registerMerchantRoutes(app, services);

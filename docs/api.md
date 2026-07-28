@@ -1,9 +1,12 @@
 # GiwaPay REST API
 
-Runtime OpenAPI is generated from route schemas:
+Runtime OpenAPI is generated from route schemas. Development exposes:
 
 - JSON: `GET /openapi.json`
 - interactive UI: `GET /docs`
+
+Production hides both routes by default. Set `EXPOSE_API_DOCS=true` only when
+public developer documentation is an intentional deployment decision.
 
 The API always uses raw integer token units as base-10 strings. Integrators must
 obtain token decimals from the deployment's verified token registry and must
@@ -79,6 +82,10 @@ execution, the router rejects the old intent. After a verified payment, the
 response adds the immutable amount snapshot derived from the canonical
 `SettlementDistributed` logs in that transaction receipt.
 
+The typed message also commits to `signer`. The router requires that address to
+remain the merchant's current delegated signer and validates it with
+OpenZeppelin `SignatureChecker`, supporting EOA and ERC-1271 signatures.
+
 | Method | Path                                               | Authentication              |
 | ------ | -------------------------------------------------- | --------------------------- |
 | `GET`  | `/v1/payment-intents`                              | scoped session/API key      |
@@ -93,6 +100,10 @@ response adds the immutable amount snapshot derived from the canonical
 input, slippage, adapter identifier/address, router/spender, and a short
 expiration. `prepare` re-quotes and returns ERC-20 approval plus router
 calldata. The wallet remains the only transaction signer.
+
+The platform fee is customer-funded: `exactOutput = settlementAmount +
+platformFee`. The fee is paid in the settlement token in addition to the exact
+merchant amount; it is not deducted from merchant settlement.
 
 Statuses:
 
@@ -148,4 +159,6 @@ Errors have a stable `error.code`, safe `error.message`, and `requestId`.
 Validation failures are `400`; authorization failures are `401/403`; conflicts
 and stale state use `409`; cap violations use `422`; unavailable chain/signing
 dependencies use `503`. Bodies are capped, all routes are rate-limited, and
-logs redact auth, cookie, CSRF, SIWE, and signature fields.
+public quote/prepare admission additionally uses PostgreSQL-shared per-intent
+limits so replicas enforce one budget. Only a purpose-keyed identity hash is
+stored. Logs redact auth, cookie, CSRF, SIWE, and signature fields.

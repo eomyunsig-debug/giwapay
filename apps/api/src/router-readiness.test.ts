@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { loadConfig } from './env.js';
-import { assertRouterConfiguration } from './router-readiness.js';
+import { assertCachedRouterConfiguration, assertRouterConfiguration } from './router-readiness.js';
 import { PaymentIntentSigner } from './signer.js';
 import type { AppServices } from './types.js';
 
@@ -56,5 +56,25 @@ describe('PaymentRouter readiness', () => {
       statusCode: 503,
       code: 'router_configuration_mismatch',
     });
+  });
+
+  it('coalesces immutable router configuration reads', async () => {
+    const target = services();
+    let calls = 0;
+    const original = target.chainClient.readContract.bind(target.chainClient);
+    target.chainClient = {
+      ...target.chainClient,
+      readContract: async (parameters: Parameters<typeof original>[0]) => {
+        calls += 1;
+        return original(parameters);
+      },
+    } as AppServices['chainClient'];
+
+    await Promise.all([
+      assertCachedRouterConfiguration(target),
+      assertCachedRouterConfiguration(target),
+    ]);
+    await assertCachedRouterConfiguration(target);
+    expect(calls).toBe(3);
   });
 });
