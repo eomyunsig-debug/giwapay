@@ -235,6 +235,10 @@ jobs:
           --sender "$DEPLOYER_ADDRESS"
           --unlocked
           --broadcast
+          --non-interactive
+          --slow
+          --timeout 60
+          --rpc-timeout 15
 
       - name: Create integration deployment manifest
         shell: bash
