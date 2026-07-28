@@ -279,9 +279,6 @@ jobs:
       - name: Install exact dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build web workspace dependencies
-        run: pnpm --filter @giwapay/web^... build
-
       - name: Install Chromium
         run: pnpm --filter @giwapay/web exec playwright install --with-deps chromium
 

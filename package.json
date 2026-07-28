@@ -25,7 +25,7 @@
     "lint": "eslint . && turbo run lint",
     "test": "turbo run test",
     "test:contracts": "pnpm --filter @giwapay/contracts test",
-    "test:e2e": "pnpm --filter @giwapay/web test:e2e",
+    "test:e2e": "pnpm --filter '@giwapay/web^...' build && pnpm --filter @giwapay/web test:e2e",
     "typecheck": "turbo run typecheck",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "demo:up": "./scripts/demo-up.sh",
