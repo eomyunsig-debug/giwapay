@@ -50,3 +50,17 @@ describe('API documentation exposure', () => {
     await app.close();
   });
 });
+
+describe('API rate-limit errors', () => {
+  it('preserves a 429 response through the centralized error handler', async () => {
+    const app = await buildApp(services(false));
+    const responses = [];
+    for (let index = 0; index < 201; index += 1) {
+      responses.push(await app.inject({ method: 'GET', url: '/health' }));
+    }
+    expect(responses.slice(0, -1).every((response) => response.statusCode === 200)).toBe(true);
+    expect(responses.at(-1)?.statusCode).toBe(429);
+    expect(responses.at(-1)?.json().error.code).toBe('rate_limit_exceeded');
+    await app.close();
+  });
+});
