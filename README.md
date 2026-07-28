@@ -26,8 +26,8 @@ production-DEX support.
 
 ## What the MVP includes
 
-- SIWE merchant login with short-lived, single-use nonces, secure session
-  cookies, origin checks, and CSRF protection
+- SIWE merchant login for EOAs and ERC-1271 contract wallets, with short-lived,
+  single-use nonces, secure session cookies, origin checks, and CSRF protection
 - one-time on-chain merchant registration and a delegated invoice signer whose
   address is contract-enforced to differ from the merchant admin, current
   payout address, and refund operator
@@ -39,7 +39,8 @@ production-DEX support.
 - exact merchant settlement, immutable platform-fee policy, and registered
   split templates with at most eight recipients
 - independent event/receipt verification, confirmation depth, reorg rollback,
-  PostgreSQL projections, and signed webhooks with retries
+  PostgreSQL projections, signed webhooks with retries, and a bounded retention
+  worker
 - full and partial merchant-funded on-chain refunds with replay-resistant
   `(merchant, intentId, refundId)` identities
 - merchant dashboard, verifiable receipts, TypeScript SDK, React component, and
@@ -86,7 +87,7 @@ an already signed invoice.
 
 ```text
 apps/web              Next.js hosted checkout and merchant dashboard
-apps/api              HTTP server, chain indexer, and webhook worker
+apps/api              HTTP server, chain indexer, webhook, and retention workers
 packages/contracts    Foundry contracts, scripts, tests, and malicious fixtures
 packages/db           Drizzle schema and PostgreSQL migration
 packages/chains       typed GIWA chain, RPC fallback, wallets, token registry
@@ -199,15 +200,18 @@ services, deploys the local contracts, and generates masked ephemeral test
 secrets before running it. Details are in
 [testing.md](docs/testing.md).
 
-The checked-in `packages/db/migrations/0000_initial.sql` is the baseline for a
-fresh database, not an in-place upgrade script for an earlier GiwaPay schema.
-See [deployment.md](docs/deployment.md) before applying it outside the
-disposable local/CI environments.
+The ordered database history starts with the fresh-database
+`0000_initial.sql` baseline. Later migrations, including the stable merchant
+identity backfill, are explicit upgrade steps. Back up retained data and review
+the whole pending sequence before applying it outside disposable local/CI
+environments; see [deployment.md](docs/deployment.md).
 
 ## API and SDK
 
-The API is available as generated OpenAPI at `/openapi.json` and Swagger UI at
-`/docs`. Mutating merchant-browser requests use the SIWE session plus
+In local/development mode, generated OpenAPI is available at `/openapi.json`
+and Swagger UI at `/docs`. Production hides both unless
+`EXPOSE_API_DOCS=true` is explicitly configured. Mutating merchant-browser
+requests use the SIWE session plus
 `X-CSRF-Token`; server integrations use `Authorization: Bearer gwp_test_…` and
 an `Idempotency-Key` for PaymentIntents and refunds.
 
@@ -232,6 +236,10 @@ console.log(result.checkoutUrl);
 
 Never put an API key in browser code. See [api.md](docs/api.md) and
 [webhooks.md](docs/webhooks.md).
+
+The configured platform fee is added to the exact merchant output and is paid
+by the customer in the settlement asset. It never reduces the merchant's
+signed settlement amount.
 
 ## GIWA Sepolia deployment
 

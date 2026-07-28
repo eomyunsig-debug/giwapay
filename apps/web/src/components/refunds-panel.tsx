@@ -11,9 +11,10 @@ import { erc20ApprovalAbi, type RefundPreparation } from '@giwapay/sdk';
 import { Button, Card, Field, Input, Select } from '@giwapay/ui';
 import { giwaPayClient } from '@/lib/api';
 import { getConfiguredToken, transactionExplorerUrl } from '@/lib/config';
-import { formatDateTime, formatRawAmount, shortAddress } from '@/lib/format';
+import { formatConfiguredAmount, formatDateTime, shortAddress } from '@/lib/format';
 import { ensureGiwaWalletClient, sendWalletTransaction } from '@/lib/wallet';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
 import { StatusBadge } from './status-badge';
 
 type RefundPhase = 'idle' | 'preparing' | 'approving' | 'refunding' | 'verifying';
@@ -175,7 +176,9 @@ export function RefundsPanel() {
     <>
       <div className="page-heading">
         <div>
-          <h1>Refunds</h1>
+          <h1>
+            <Bilingual ko="환불" en="Refunds" />
+          </h1>
           <p>Full or partial refunds are funded directly by the merchant wallet.</p>
         </div>
       </div>
@@ -190,7 +193,9 @@ export function RefundsPanel() {
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
-          <h2>Initiate merchant-funded refund</h2>
+          <h2>
+            <Bilingual ko="판매자 자금 환불 시작" en="Initiate merchant-funded refund" />
+          </h2>
         </div>
         <form className="panel-body" onSubmit={submit}>
           <div className="form-grid">
@@ -214,9 +219,9 @@ export function RefundsPanel() {
                   return (
                     <option value={intent.id} key={intent.id}>
                       {intent.description} ·{' '}
-                      {formatRawAmount(
+                      {formatConfiguredAmount(
                         BigInt(intent.settlement.amount).toString(),
-                        metadata?.decimals ?? 18,
+                        metadata,
                       )}{' '}
                       {metadata?.symbol ?? shortAddress(intent.settlement.token)}
                     </option>
@@ -229,11 +234,11 @@ export function RefundsPanel() {
               htmlFor="refund-amount"
               hint={
                 selected
-                  ? `Remaining: ${formatRawAmount(
+                  ? `Remaining: ${formatConfiguredAmount(
                       (
                         BigInt(selected.settlement.amount) - BigInt(selected.refundedAmount)
                       ).toString(),
-                      token?.decimals ?? 18,
+                      token,
                     )} ${token?.symbol ?? ''}`
                   : 'Choose a verified payment first.'
               }
@@ -330,7 +335,9 @@ export function RefundsPanel() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Refundable payments</h2>
+          <h2>
+            <Bilingual ko="환불 가능한 결제" en="Refundable payments" />
+          </h2>
         </div>
         {intents.isLoading ? (
           <LoadingState />
@@ -359,11 +366,11 @@ export function RefundsPanel() {
                       <span className="table-secondary">{intent.id}</span>
                     </td>
                     <td>
-                      {formatRawAmount(intent.settlement.amount, metadata?.decimals ?? 18)}{' '}
+                      {formatConfiguredAmount(intent.settlement.amount, metadata)}{' '}
                       {metadata?.symbol ?? ''}
                     </td>
                     <td>
-                      {formatRawAmount(intent.refundedAmount, metadata?.decimals ?? 18)}{' '}
+                      {formatConfiguredAmount(intent.refundedAmount, metadata)}{' '}
                       {metadata?.symbol ?? ''}
                     </td>
                     <td>

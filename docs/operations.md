@@ -7,11 +7,20 @@ Run these as separately supervised services:
 - `@giwapay/api start:server`
 - `@giwapay/api start:indexer`
 - `@giwapay/api start:webhooks`
+- `@giwapay/api start:retention`
 
-Apply reviewed migrations once before starting a new application release. The
-checked-in `0000_initial.sql` is only for a fresh, empty database; it is not an
-upgrade for retained or hand-created schemas. All processes use PostgreSQL;
-Redis is not required.
+Apply reviewed migrations once before starting a new application release.
+`0000_initial.sql` is only the fresh-database baseline; later numbered files
+are the ordered upgrade path. Never apply the baseline to a retained or
+hand-created schema. All processes use PostgreSQL; Redis is not required.
+
+The retention worker deletes expired/used authentication material, expired or
+revoked sessions, terminal webhook history older than the configured window,
+chain-block rows older than the reorg/finality safety floor, and expired
+distributed request-limit buckets. It never
+deletes a webhook event with a pending/retry/processing delivery. Configure
+`AUTH_RETENTION_DAYS`, `WEBHOOK_RETENTION_DAYS`, and
+`RETENTION_BATCH_SIZE` according to policy and backup requirements.
 
 ## Health
 
@@ -55,9 +64,19 @@ changing it without migration makes endpoints unusable.
 - Merchant admins rotate/revoke delegated signers on-chain. Pending signatures
   from the old signer fail at the router.
 - API keys are independently revocable and should be scoped and short-lived.
-- Session/API pepper changes revoke existing material.
-- PaymentIntent signer rotation requires every merchant to register the new
-  address before the service signs new intents.
+- `SESSION_SECRET` is expanded with HKDF into separate session-token, CSRF,
+  SIWE-nonce, and quote-envelope keys. Rotating it revokes outstanding browser
+  sessions, nonces, and quotes.
+- Production PaymentIntent signing uses one non-exportable AWS KMS
+  `ECC_SECG_P256K1` key per merchant. `PAYMENT_INTENT_SIGNER_KEYS_JSON` binds
+  each stable merchant address to a distinct KMS key ID and expected Ethereum
+  address; duplicate key IDs fail configuration.
+- Rotate one merchant at a time: provision the replacement KMS key, verify its
+  derived address, have the merchant rotate the delegated signer on-chain,
+  update the merchant's configured key binding, then verify `/ready` before
+  disabling the old KMS key. Never reuse a KMS key between merchants.
+- `PAYMENT_INTENT_SIGNER_PRIVATE_KEY` is retained only for local/testnet demo
+  workflows and is rejected when `NODE_ENV=production`.
 - Contract owner/adapter-manager transfer uses the on-chain two-step flow and
   must be verified before the old operator relinquishes access. On
   `AdapterRegistry.acceptOwnership`, the contract automatically revokes any
@@ -70,8 +89,9 @@ Never log, paste into tickets, or commit the material itself.
 
 - **Suspicious adapter:** adapter manager disables it; router owner may pause
   new payments. Refunds remain available.
-- **Delegated signer leak:** merchants revoke/rotate it; stop API signing; do
-  not alter payout/splits.
+- **Delegated signer leak:** disable the affected merchant's KMS key, stop API
+  signing for that merchant, and have its admin revoke/rotate the signer
+  on-chain. Do not alter payout/splits.
 - **RPC disagreement:** fail readiness and signing/quotes; compare independent
   providers and stored block hashes.
 - **Webhook compromise:** disable endpoint, rotate its secret by creating a new

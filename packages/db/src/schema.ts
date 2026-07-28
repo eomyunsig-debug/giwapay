@@ -83,6 +83,7 @@ export const merchants = pgTable(
   'merchants',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    onchainMerchantAddress: char('onchain_merchant_address', { length: 42 }).notNull(),
     adminAddress: char('admin_address', { length: 42 }).notNull(),
     payoutAddress: char('payout_address', { length: 42 }).notNull(),
     delegatedSignerAddress: char('delegated_signer_address', { length: 42 }),
@@ -96,7 +97,12 @@ export const merchants = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('merchants_onchain_address_uq').on(table.onchainMerchantAddress),
     uniqueIndex('merchants_admin_address_uq').on(table.adminAddress),
+    check(
+      'merchants_onchain_address_lowercase',
+      sql`${table.onchainMerchantAddress} = lower(${table.onchainMerchantAddress})`,
+    ),
     check(
       'merchants_admin_address_lowercase',
       sql`${table.adminAddress} = lower(${table.adminAddress})`,
@@ -162,6 +168,7 @@ export const sessions = pgTable(
     merchantId: uuid('merchant_id')
       .notNull()
       .references(() => merchants.id, { onDelete: 'cascade' }),
+    walletAddress: char('wallet_address', { length: 42 }).notNull(),
     tokenHash: char('token_hash', { length: 64 }).notNull(),
     csrfHash: char('csrf_hash', { length: 64 }).notNull(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -173,6 +180,25 @@ export const sessions = pgTable(
     uniqueIndex('sessions_token_hash_uq').on(table.tokenHash),
     index('sessions_merchant_idx').on(table.merchantId),
     index('sessions_expiry_idx').on(table.expiresAt),
+    check(
+      'sessions_wallet_address_lowercase',
+      sql`${table.walletAddress} = lower(${table.walletAddress})`,
+    ),
+  ],
+);
+
+export const requestRateLimits = pgTable(
+  'request_rate_limits',
+  {
+    rateKey: char('rate_key', { length: 64 }).notNull(),
+    windowStart: bigint('window_start', { mode: 'bigint' }).notNull(),
+    requestCount: integer('request_count').notNull().default(1),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({ name: 'request_rate_limits_pk', columns: [table.rateKey, table.windowStart] }),
+    index('request_rate_limits_expiry_idx').on(table.expiresAt),
+    check('request_rate_limits_positive_count', sql`${table.requestCount} > 0`),
   ],
 );
 

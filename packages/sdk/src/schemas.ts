@@ -43,6 +43,7 @@ export type MerchantSummary = z.infer<typeof merchantSummarySchema>;
 
 export const merchantSchema = z.object({
   id: z.uuid(),
+  onchainMerchantAddress: addressSchema,
   adminAddress: addressSchema,
   payoutAddress: addressSchema,
   delegatedSignerAddress: addressSchema.nullable(),

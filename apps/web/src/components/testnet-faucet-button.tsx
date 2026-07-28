@@ -10,8 +10,11 @@ import { mockTokenFaucetAbi } from '@giwapay/sdk';
 import { Button } from '@giwapay/ui';
 import { MOCK_TOKEN_FAUCET_ADDRESS, transactionExplorerUrl } from '@/lib/config';
 import { shortAddress } from '@/lib/format';
+import { useGiwaPayLocale } from './language-toggle';
 
 export function TestnetFaucetButton({ token, label }: { token?: Address; label?: string }) {
+  const locale = useGiwaPayLocale();
+  const ko = locale === 'ko';
   const { chainId, isConnected } = useAccount();
   const { switchChainAsync } = useSwitchChain();
   const { writeContractAsync } = useWriteContract();
@@ -43,10 +46,18 @@ export function TestnetFaucetButton({ token, label }: { token?: Address; label?:
         hash: transactionHash,
         confirmations: 1,
       });
-      if (receipt.status !== 'success') throw new Error('Faucet claim reverted.');
+      if (receipt.status !== 'success') {
+        throw new Error(ko ? '테스트 토큰 수령 거래가 취소되었습니다.' : 'Faucet claim reverted.');
+      }
       setHash(transactionHash);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Faucet claim failed');
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : ko
+            ? '테스트 토큰 수령에 실패했습니다.'
+            : 'Faucet claim failed',
+      );
     } finally {
       setClaiming(false);
     }
@@ -62,7 +73,13 @@ export function TestnetFaucetButton({ token, label }: { token?: Address; label?:
         disabled={!isConnected || !token}
       >
         {hash ? <Check size={13} /> : <Droplets size={13} />}
-        {hash ? 'Test token claim mined' : `Claim ${label ?? 'mock token'}`}
+        {hash
+          ? ko
+            ? '테스트 토큰 수령 완료'
+            : 'Test token claim mined'
+          : ko
+            ? `${label ?? 'Mock 토큰'} 받기`
+            : `Claim ${label ?? 'mock token'}`}
       </Button>
       {hash && explorerUrl ? (
         <a
@@ -72,11 +89,11 @@ export function TestnetFaucetButton({ token, label }: { token?: Address; label?:
           rel="noreferrer"
           style={{ marginLeft: 8, fontSize: 11 }}
         >
-          Explorer <ExternalLink size={10} />
+          {ko ? '탐색기' : 'Explorer'} <ExternalLink size={10} />
         </a>
       ) : hash ? (
         <span className="mono" style={{ marginLeft: 8, fontSize: 11 }}>
-          Local Anvil transaction {shortAddress(hash)}
+          {ko ? '로컬 Anvil 거래' : 'Local Anvil transaction'} {shortAddress(hash)}
         </span>
       ) : null}
       {error ? (

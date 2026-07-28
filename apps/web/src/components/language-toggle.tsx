@@ -3,6 +3,8 @@
 import { Languages } from 'lucide-react';
 import { useEffect, useSyncExternalStore } from 'react';
 
+export type GiwaPayLocale = 'ko' | 'en';
+
 const localeEvent = 'giwapay:locale';
 const subscribe = (listener: () => void) => {
   window.addEventListener(localeEvent, listener);
@@ -12,11 +14,15 @@ const subscribe = (listener: () => void) => {
     window.removeEventListener('storage', listener);
   };
 };
-const getLocale = (): 'ko' | 'en' =>
+const getLocale = (): GiwaPayLocale =>
   window.localStorage.getItem('giwapay.locale') === 'en' ? 'en' : 'ko';
 
+export function useGiwaPayLocale(): GiwaPayLocale {
+  return useSyncExternalStore(subscribe, getLocale, () => 'ko');
+}
+
 export function LanguageToggle() {
-  const locale = useSyncExternalStore(subscribe, getLocale, () => 'ko');
+  const locale = useGiwaPayLocale();
 
   useEffect(() => {
     document.documentElement.lang = locale;

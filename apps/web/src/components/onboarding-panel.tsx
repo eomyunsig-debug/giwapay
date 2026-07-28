@@ -13,6 +13,7 @@ import { giwaPayClient } from '@/lib/api';
 import { MERCHANT_REGISTRY_ADDRESS, transactionExplorerUrl } from '@/lib/config';
 import { shortAddress } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
 
 export function OnboardingPanel() {
   const { address, isConnected, chainId } = useAccount();
@@ -27,21 +28,42 @@ export function OnboardingPanel() {
   const [payout, setPayout] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [submittedHash, setSubmittedHash] = useState<`0x${string}`>();
+  const [newAdmin, setNewAdmin] = useState('');
+  const [adminTransferHash, setAdminTransferHash] = useState<`0x${string}`>();
   const [error, setError] = useState<string>();
+  const merchantIdentity = merchant.data?.merchant.onchainMerchantAddress;
   const onchainRegistration = useQuery({
-    queryKey: ['merchant-registration', MERCHANT_REGISTRY_ADDRESS, address],
-    enabled: Boolean(MERCHANT_REGISTRY_ADDRESS && address && publicClient),
+    queryKey: ['merchant-registration', MERCHANT_REGISTRY_ADDRESS, merchantIdentity],
+    enabled: Boolean(MERCHANT_REGISTRY_ADDRESS && merchantIdentity && publicClient),
     queryFn: async () => {
       const registryAddress = MERCHANT_REGISTRY_ADDRESS;
-      if (!registryAddress || !address || !publicClient) return undefined;
+      if (!registryAddress || !merchantIdentity || !publicClient) return undefined;
       return publicClient.readContract({
         address: registryAddress,
         abi: merchantRegistryAbi,
         functionName: 'getMerchant',
-        args: [address],
+        args: [merchantIdentity],
       });
     },
     refetchInterval: submittedHash ? 2_000 : false,
+  });
+  const pendingAdmin = useQuery({
+    queryKey: ['merchant-pending-admin', MERCHANT_REGISTRY_ADDRESS, merchantIdentity],
+    enabled: Boolean(
+      MERCHANT_REGISTRY_ADDRESS &&
+      merchantIdentity &&
+      publicClient &&
+      merchant.data?.merchant.onchainRegisteredAt,
+    ),
+    queryFn: async () => {
+      if (!MERCHANT_REGISTRY_ADDRESS || !merchantIdentity || !publicClient) return zeroAddress;
+      return publicClient.readContract({
+        address: MERCHANT_REGISTRY_ADDRESS,
+        abi: merchantRegistryAbi,
+        functionName: 'pendingAdmin',
+        args: [merchantIdentity],
+      });
+    },
   });
 
   if (merchant.isLoading) return <LoadingState label="Loading merchant state…" />;
@@ -72,6 +94,12 @@ export function OnboardingPanel() {
     onchainRegistration.data.createdAt > 0n,
   );
   const submittedExplorerUrl = submittedHash ? transactionExplorerUrl(submittedHash) : undefined;
+  const pendingAdminAddress =
+    pendingAdmin.data && pendingAdmin.data !== zeroAddress ? pendingAdmin.data : undefined;
+  const adminTransferUrl =
+    pendingAdminAddress && merchantIdentity
+      ? `${typeof window === 'undefined' ? '' : window.location.origin}/admin-transfer/${merchantIdentity}`
+      : undefined;
 
   const verifyRegistration = async (): Promise<boolean> => {
     setSubmitting(true);
@@ -151,11 +179,76 @@ export function OnboardingPanel() {
     }
   };
 
+  const proposeAdminTransfer = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(undefined);
+    if (
+      !address ||
+      !isAddress(newAdmin) ||
+      !MERCHANT_REGISTRY_ADDRESS ||
+      !publicClient ||
+      !merchantIdentity
+    ) {
+      setError('Connect the current admin wallet and enter a valid replacement admin address.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      if (chainId !== GIWA_SEPOLIA_CHAIN_ID) {
+        await switchChainAsync({ chainId: GIWA_SEPOLIA_CHAIN_ID });
+      }
+      const hash = await writeContractAsync({
+        address: MERCHANT_REGISTRY_ADDRESS,
+        abi: merchantRegistryAbi,
+        functionName: 'proposeAdmin',
+        args: [newAdmin as Address],
+        chainId: GIWA_SEPOLIA_CHAIN_ID,
+      });
+      setAdminTransferHash(hash);
+      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+      if (receipt.status !== 'success') throw new Error('Admin transfer proposal reverted.');
+      await pendingAdmin.refetch();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Admin transfer proposal failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cancelAdminTransfer = async () => {
+    setError(undefined);
+    if (!MERCHANT_REGISTRY_ADDRESS || !publicClient) return;
+    setSubmitting(true);
+    try {
+      if (chainId !== GIWA_SEPOLIA_CHAIN_ID) {
+        await switchChainAsync({ chainId: GIWA_SEPOLIA_CHAIN_ID });
+      }
+      const hash = await writeContractAsync({
+        address: MERCHANT_REGISTRY_ADDRESS,
+        abi: merchantRegistryAbi,
+        functionName: 'cancelAdminTransfer',
+        args: [],
+        chainId: GIWA_SEPOLIA_CHAIN_ID,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 1 });
+      if (receipt.status !== 'success') throw new Error('Admin transfer cancellation reverted.');
+      setAdminTransferHash(hash);
+      setNewAdmin('');
+      await pendingAdmin.refetch();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Admin transfer cancellation failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <>
       <div className="page-heading">
         <div>
-          <h1>Merchant onboarding</h1>
+          <h1>
+            <Bilingual ko="판매자 온보딩" en="Merchant onboarding" />
+          </h1>
           <p>
             Keep merchant administration, payout, and invoice-signing authority deliberately
             separated.
@@ -166,7 +259,9 @@ export function OnboardingPanel() {
       <div className="form-grid" style={{ alignItems: 'start' }}>
         <Card className="panel">
           <div className="panel-header">
-            <h2>Onchain merchant registration</h2>
+            <h2>
+              <Bilingual ko="온체인 판매자 등록" en="Onchain merchant registration" />
+            </h2>
           </div>
           <form className="panel-body" onSubmit={register}>
             <div className="form-grid">
@@ -308,6 +403,76 @@ export function OnboardingPanel() {
           </div>
         </div>
       </div>
+
+      {registered ? (
+        <Card className="panel" style={{ marginTop: 20 }}>
+          <div className="panel-header">
+            <h2>
+              <Bilingual ko="판매자 관리자 이전" en="Rotate merchant admin" />
+            </h2>
+          </div>
+          <form className="panel-body" onSubmit={proposeAdminTransfer}>
+            <p className="metric-caption">
+              The merchant identity remains <span className="mono">{merchantIdentity}</span>.
+              Existing PaymentIntents, splits, and refund records do not move.
+            </p>
+            <Field
+              label="Replacement admin"
+              htmlFor="replacement-admin"
+              hint="The replacement wallet must explicitly accept onchain. This does not recover an already lost key."
+            >
+              <Input
+                id="replacement-admin"
+                className="mono"
+                value={pendingAdminAddress ?? newAdmin}
+                onChange={(event) => setNewAdmin(event.target.value)}
+                readOnly={Boolean(pendingAdminAddress)}
+                placeholder="0x…"
+                spellCheck={false}
+                required
+              />
+            </Field>
+            {pendingAdminAddress ? (
+              <div className="info-banner" role="status">
+                <Info size={16} />
+                <span>
+                  Pending acceptance by <span className="mono">{pendingAdminAddress}</span>.
+                  {adminTransferUrl ? (
+                    <>
+                      {' '}
+                      Share only this acceptance link:{' '}
+                      <a className="explorer-link" href={adminTransferUrl}>
+                        Open transfer <ExternalLink size={11} />
+                      </a>
+                    </>
+                  ) : null}
+                </span>
+              </div>
+            ) : null}
+            {adminTransferHash ? (
+              <p className="metric-caption">
+                Last admin-transfer transaction: {shortAddress(adminTransferHash)}
+              </p>
+            ) : null}
+            <div className="form-actions">
+              {pendingAdminAddress ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  loading={submitting}
+                  onClick={() => void cancelAdminTransfer()}
+                >
+                  Cancel pending transfer
+                </Button>
+              ) : (
+                <Button type="submit" loading={submitting} disabled={!isAddress(newAdmin)}>
+                  Propose two-step transfer
+                </Button>
+              )}
+            </div>
+          </form>
+        </Card>
+      ) : null}
     </>
   );
 }

@@ -24,12 +24,7 @@ export default function DocsPage() {
               signing key in browser code.
             </p>
           </div>
-          <a
-            className="action-link"
-            href={`${API_BASE_URL}/documentation`}
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a className="action-link" href={`${API_BASE_URL}/docs`} target="_blank" rel="noreferrer">
             OpenAPI <ExternalLink size={14} />
           </a>
         </div>

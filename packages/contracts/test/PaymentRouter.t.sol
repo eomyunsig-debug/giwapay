@@ -10,7 +10,8 @@ import {
     SenderFeeToken,
     LyingExactOutputAdapter,
     ShortOutputAdapter,
-    ReentrantExactOutputAdapter
+    ReentrantExactOutputAdapter,
+    TestERC1271Signer
 } from "./mocks/MaliciousContracts.sol";
 
 contract PaymentRouterTest is PaymentTestBase {
@@ -227,6 +228,7 @@ contract PaymentRouterTest is PaymentTestBase {
             _intent(sharedIntentId, address(mockKRW), amount, bytes32(0), address(0));
         PaymentRouter.PaymentIntent memory second = abi.decode(abi.encode(first), (PaymentRouter.PaymentIntent));
         second.merchant = secondMerchant;
+        second.signer = secondSigner;
         (address[] memory secondRecipients, uint16[] memory secondBps,) =
             merchantRegistry.getSplitTemplate(secondMerchant, bytes32(0));
         second.splitHash = keccak256(abi.encode(secondRecipients, secondBps));
@@ -287,6 +289,42 @@ contract PaymentRouterTest is PaymentTestBase {
         vm.prank(payer);
         vm.expectRevert(PaymentRouter.InvalidIntentSignature.selector);
         router.pay(oldSignerIntent, oldSignature, _directParams(address(mockKRW), amount + _platformFee(amount)));
+    }
+
+    function test_ERC1271DelegatedSignerCanAuthorizePayment() public {
+        uint256 smartSignerOwnerKey = uint256(keccak256("erc1271-owner"));
+        TestERC1271Signer smartSigner = new TestERC1271Signer(vm.addr(smartSignerOwnerKey));
+        vm.prank(merchant);
+        merchantRegistry.rotateDelegatedSigner(address(smartSigner));
+
+        uint256 amount = 100e6;
+        PaymentRouter.PaymentIntent memory intent =
+            _intent(keccak256("erc1271-payment"), address(mockKRW), amount, bytes32(0), address(0));
+        intent.signer = address(smartSigner);
+        bytes memory signature = _signWithKey(intent, smartSignerOwnerKey);
+
+        vm.prank(payer);
+        router.pay(intent, signature, _directParams(address(mockKRW), amount + _platformFee(amount)));
+
+        assertTrue(router.usedIntents(merchant, intent.intentId));
+        assertEq(mockKRW.balanceOf(payout), amount);
+    }
+
+    function test_ERC1271RejectsSignatureFromWrongOwner() public {
+        uint256 smartSignerOwnerKey = uint256(keccak256("erc1271-owner"));
+        TestERC1271Signer smartSigner = new TestERC1271Signer(vm.addr(smartSignerOwnerKey));
+        vm.prank(merchant);
+        merchantRegistry.rotateDelegatedSigner(address(smartSigner));
+
+        uint256 amount = 100e6;
+        PaymentRouter.PaymentIntent memory intent =
+            _intent(keccak256("erc1271-wrong-owner"), address(mockKRW), amount, bytes32(0), address(0));
+        intent.signer = address(smartSigner);
+        bytes memory signature = _signWithKey(intent, signerPrivateKey);
+
+        vm.prank(payer);
+        vm.expectRevert(PaymentRouter.InvalidIntentSignature.selector);
+        router.pay(intent, signature, _directParams(address(mockKRW), amount + _platformFee(amount)));
     }
 
     function test_FullAndPartialMerchantFundedRefund() public {
@@ -363,6 +401,34 @@ contract PaymentRouterTest is PaymentTestBase {
         router.pause();
         vm.prank(merchant);
         router.refund(merchant, intentId, keccak256("paused-full-refund"), amount);
+    }
+
+    function test_AdminRotationPreservesHistoricalPaymentAndRefundNamespace() public {
+        bytes32 intentId = keccak256("admin-rotation-refund");
+        uint256 amount = 100e6;
+        PaymentRouter.PaymentIntent memory intent = _intent(intentId, address(mockKRW), amount, bytes32(0), address(0));
+        bytes memory signature = _sign(intent);
+        vm.prank(payer);
+        router.pay(intent, signature, _directParams(address(mockKRW), amount + _platformFee(amount)));
+
+        address newAdmin = makeAddr("newAdmin");
+        vm.prank(merchant);
+        merchantRegistry.proposeAdmin(newAdmin);
+        vm.prank(newAdmin);
+        merchantRegistry.acceptAdmin(merchant);
+
+        mockKRW.mint(newAdmin, amount);
+        vm.prank(newAdmin);
+        mockKRW.approve(address(router), amount);
+
+        vm.prank(merchant);
+        vm.expectRevert(PaymentRouter.UnauthorizedRefundOperator.selector);
+        router.refund(merchant, intentId, keccak256("old-admin-refund"), 1);
+
+        vm.prank(newAdmin);
+        router.refund(merchant, intentId, keccak256("new-admin-refund"), amount);
+        (,,,,, uint256 refundedAmount) = router.paymentRecords(merchant, intentId);
+        assertEq(refundedAmount, amount);
     }
 
     function test_FeeOnTransferIncomingAndOutgoingAreRejected() public {

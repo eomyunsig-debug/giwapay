@@ -42,6 +42,13 @@ adapter-manager authority retained by the previous owner. Verify the new owner,
 the configured `ADAPTER_MANAGER_ADDRESS`, and the previous owner's revoked
 manager state on-chain before enabling application traffic.
 
+Adapter registration rejects bytecode containing the executable
+`DELEGATECALL` opcode, excluding delegatecall-based proxies and mutable
+implementation routing. Runtime code-hash pinning then detects bytecode
+replacement on every payment. This does not prove an adapter's economics or
+external dependencies are safe: review verified source, token pairs, input
+caps, ownership, and every external call before registration.
+
 ## Application configuration
 
 Copy `.env.example` outside source control and supply secrets through the
@@ -56,6 +63,8 @@ deployment platform. Required production boundaries include:
 - strong independent session, API-key pepper, and 32-byte webhook encryption
   keys;
 - exact HTTPS web/API origins and production cookie domain.
+- `EXPOSE_API_DOCS=false` unless public Swagger/OpenAPI routes are an explicit
+  product requirement.
 
 `NEXT_PUBLIC_*` values are public and are embedded at web image build time.
 Never place a private key, API secret, or database credential in those values.
@@ -63,13 +72,14 @@ WalletConnect is omitted unless its public project ID is configured.
 
 ## Database baseline
 
-`packages/db/migrations/0000_initial.sql` creates the current schema on a
-**fresh, empty database**. It is the repository's initial baseline, not an
-in-place migration from a prior GiwaPay schema and not a generic reconciliation
-script for hand-created tables. Disposable local and CI databases may be
-recreated. Before applying anything to retained data, take a tested backup and
-write/review an explicit migration or rebuild the chain projection with
-webhook delivery stopped.
+`packages/db/migrations/0000_initial.sql` is the **fresh, empty database**
+baseline, not a generic reconciliation script for hand-created tables.
+Subsequent numbered files are explicit ordered upgrades.
+`0001_stable_merchant_identity.sql` backfills stable merchant identity and
+session-wallet ownership from the pre-existing admin relationship before
+adding non-null and uniqueness constraints. Before applying pending migrations
+to retained data, take a tested backup, review the migration sequence, and
+stop chain projection/webhook delivery for the maintenance window.
 
 ## Containers
 

@@ -24,6 +24,8 @@ function distributionLog(
   recipient: Address,
   token: Address,
   logIndex: number,
+  amount = 100n,
+  basisPoints = 10_000,
 ): TransactionReceipt['logs'][number] {
   return {
     address: router,
@@ -34,7 +36,7 @@ function distributionLog(
     }),
     data: encodeAbiParameters(
       [{ type: 'address' }, { type: 'uint256' }, { type: 'uint16' }],
-      [token, 100n, 10_000],
+      [token, amount, basisPoints],
     ),
     blockHash: zeroHash,
     blockNumber: 1n,
@@ -85,6 +87,54 @@ describe('settlement receipt verification', () => {
       verifiedSettlementRecipients(
         {
           logs: [distributionLog(merchantA, recipientA, `0x${'44'.repeat(20)}`, 0)],
+        },
+        router,
+        payment,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('accepts deterministic final-recipient rounding and preserves the exact total', () => {
+    const recipients = verifiedSettlementRecipients(
+      {
+        logs: [
+          distributionLog(merchantA, recipientA, settlementToken, 0, 33n, 3_333),
+          distributionLog(merchantA, recipientB, settlementToken, 1, 67n, 6_667),
+        ],
+      },
+      router,
+      payment,
+    );
+
+    expect(recipients?.map(({ amount }) => amount)).toEqual(['33', '67']);
+    expect(recipients?.reduce((total, recipient) => total + BigInt(recipient.amount), 0n)).toBe(
+      100n,
+    );
+  });
+
+  it('rejects duplicate recipients even when amounts and basis points add up', () => {
+    expect(
+      verifiedSettlementRecipients(
+        {
+          logs: [
+            distributionLog(merchantA, recipientA, settlementToken, 0, 50n, 5_000),
+            distributionLog(merchantA, recipientA, settlementToken, 1, 50n, 5_000),
+          ],
+        },
+        router,
+        payment,
+      ),
+    ).toBeUndefined();
+  });
+
+  it('rejects incomplete or incorrectly rounded distributions', () => {
+    expect(
+      verifiedSettlementRecipients(
+        {
+          logs: [
+            distributionLog(merchantA, recipientA, settlementToken, 0, 33n, 3_333),
+            distributionLog(merchantA, recipientB, settlementToken, 1, 66n, 6_667),
+          ],
         },
         router,
         payment,

@@ -505,7 +505,7 @@ export class ChainIndexer {
           .where(
             and(
               eq(paymentIntents.paymentId, aggregate),
-              eq(merchants.adminAddress, merchantAddress),
+              eq(merchants.onchainMerchantAddress, merchantAddress),
             ),
           )
           .limit(1);
@@ -657,7 +657,7 @@ export class ChainIndexer {
       .where(
         and(
           eq(paymentIntents.paymentId, args.intentId),
-          eq(merchants.adminAddress, normalizeAddress(args.merchant)),
+          eq(merchants.onchainMerchantAddress, normalizeAddress(args.merchant)),
         ),
       )
       .limit(1);
@@ -670,7 +670,7 @@ export class ChainIndexer {
     }
     const { intent, merchant } = row;
     const valid =
-      merchant.adminAddress === normalizeAddress(args.merchant) &&
+      merchant.onchainMerchantAddress === normalizeAddress(args.merchant) &&
       intent.settlementToken === normalizeAddress(args.settlementToken) &&
       BigInt(intent.settlementAmount) === args.merchantAmount &&
       BigInt(intent.platformFee) === args.platformFee &&
@@ -787,14 +787,14 @@ export class ChainIndexer {
       .where(
         and(
           eq(paymentIntents.paymentId, args.intentId),
-          eq(merchants.adminAddress, normalizeAddress(args.merchant)),
+          eq(merchants.onchainMerchantAddress, normalizeAddress(args.merchant)),
         ),
       )
       .limit(1);
     if (!row || log.logIndex === null || !log.blockHash) return;
     const { intent, merchant } = row;
     const valid =
-      merchant.adminAddress === normalizeAddress(args.merchant) &&
+      merchant.onchainMerchantAddress === normalizeAddress(args.merchant) &&
       intent.settlementToken === normalizeAddress(args.settlementToken) &&
       intent.payerAddress === normalizeAddress(args.payer) &&
       args.amount > 0n &&

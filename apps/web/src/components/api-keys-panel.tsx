@@ -9,6 +9,7 @@ import { Button, Card, Field, Input } from '@giwapay/ui';
 import { giwaPayClient } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
 
 export function ApiKeysPanel() {
   const [name, setName] = useState('');
@@ -65,8 +66,14 @@ export function ApiKeysPanel() {
     <>
       <div className="page-heading">
         <div>
-          <h1>API keys</h1>
-          <p>Create scoped merchant credentials for your server integration.</p>
+          <h1>
+            <Bilingual ko="API 키" en="API keys" />
+          </h1>
+          <Bilingual
+            as="div"
+            ko="서버 연동을 위한 범위 제한 판매자 인증 정보를 만드세요."
+            en="Create scoped merchant credentials for your server integration."
+          />
         </div>
       </div>
 
@@ -96,7 +103,9 @@ export function ApiKeysPanel() {
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
-          <h2>Create API key</h2>
+          <h2>
+            <Bilingual ko="API 키 만들기" en="Create API key" />
+          </h2>
         </div>
         <form className="panel-body" onSubmit={create}>
           <div className="form-grid">
@@ -132,7 +141,9 @@ export function ApiKeysPanel() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Active credentials</h2>
+          <h2>
+            <Bilingual ko="활성 인증 정보" en="Active credentials" />
+          </h2>
         </div>
         {keys.isLoading ? (
           <LoadingState />

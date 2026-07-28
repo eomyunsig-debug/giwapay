@@ -32,7 +32,8 @@ Never send a seed phrase or private key as part of a report.
 - Store all signing/session/webhook/database secrets in a secret manager.
 - Configure at least two production-grade GIWA RPC providers; the public RPC is
   rate-limited.
-- Run API, indexer, and webhook worker as separate least-privilege processes.
+- Run API, indexer, webhook, and retention workers as separate least-privilege
+  processes.
 - Keep test tokens and the fixed-rate adapter disabled outside labelled testnet
   environments.
 - Monitor adapter code hashes, indexer lag, reorgs, webhook dead letters, API-key
@@ -42,6 +43,8 @@ Never send a seed phrase or private key as part of a report.
   from the current registry.
 - Require every PaymentIntent signature to bind the resolved recipient/bps
   snapshot through `splitHash`; registry edits must invalidate old invoices.
+- Require the signed `signer` to match the registry's current delegated signer;
+  EOA and ERC-1271 validation must use the same EIP-712 digest.
 - Once refund calldata is issued, keep the same
   `(merchant, intentId, refundId)` pending identity. Resume may rebuild it, but
   no off-chain action can revoke already signed or broadcast calldata.

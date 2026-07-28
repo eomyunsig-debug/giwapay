@@ -13,6 +13,7 @@ import { giwaPayClient } from '@/lib/api';
 import { DEFAULT_SPLIT_ID, getConfiguredToken } from '@/lib/config';
 import { formatDateTime } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
 import { StatusBadge } from './status-badge';
 
 const defaultExpiry = (): string => {
@@ -92,14 +93,22 @@ export function PaymentLinksPanel() {
     <>
       <div className="page-heading">
         <div>
-          <h1>Payment links</h1>
-          <p>Create a signed PaymentIntent, hosted checkout link, and QR code.</p>
+          <h1>
+            <Bilingual ko="결제 링크" en="Payment links" />
+          </h1>
+          <Bilingual
+            as="div"
+            ko="서명된 결제 요청, 호스팅 결제 링크와 QR 코드를 만드세요."
+            en="Create a signed PaymentIntent, hosted checkout link, and QR code."
+          />
         </div>
       </div>
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
-          <h2>Create payment intent</h2>
+          <h2>
+            <Bilingual ko="결제 요청 만들기" en="Create payment intent" />
+          </h2>
           <span className={`gp-badge gp-badge--${selectedToken?.testOnly ? 'warning' : 'info'}`}>
             {selectedToken?.testOnly ? 'Testnet demo' : 'GIWA Sepolia'}
           </span>
@@ -245,7 +254,9 @@ export function PaymentLinksPanel() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Recent links</h2>
+          <h2>
+            <Bilingual ko="최근 링크" en="Recent links" />
+          </h2>
         </div>
         {intents.isLoading ? (
           <LoadingState />

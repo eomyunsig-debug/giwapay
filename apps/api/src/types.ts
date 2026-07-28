@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 
 import type { createChainClient } from './chain.js';
 import type { AppConfig } from './env.js';
-import type { PaymentIntentSigner } from './signer.js';
+import type { IntentSignerProvider } from './signer.js';
 
 export type AuthPrincipal = {
   merchantId: string;
@@ -19,7 +19,7 @@ export type AppServices = {
   db: Database;
   pool: Pool;
   chainClient: ReturnType<typeof createChainClient>;
-  intentSigner: PaymentIntentSigner;
+  intentSigner: IntentSignerProvider;
 };
 
 declare module 'fastify' {

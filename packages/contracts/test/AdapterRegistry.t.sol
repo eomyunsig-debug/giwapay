@@ -7,6 +7,14 @@ import {MockFixedRateExactOutputAdapter} from "../src/mocks/MockFixedRateExactOu
 import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {MockKRW} from "../src/mocks/MockKRW.sol";
 
+contract DelegatecallAdapter {
+    fallback() external {
+        assembly {
+            pop(delegatecall(gas(), caller(), 0, 0, 0, 0))
+        }
+    }
+}
+
 contract AdapterRegistryTest is Test {
     AdapterRegistry internal registry;
     MockFixedRateExactOutputAdapter internal adapter;
@@ -38,6 +46,12 @@ contract AdapterRegistryTest is Test {
         AdapterRegistry productionRegistry = new AdapterRegistry(address(this), address(this), true);
         vm.expectRevert(AdapterRegistry.TestAdapterForbiddenInProduction.selector);
         productionRegistry.registerAdapter(address(adapter), "mock", true);
+    }
+
+    function test_RejectsDelegatecallBasedAdaptersAndProxies() public {
+        DelegatecallAdapter proxyLikeAdapter = new DelegatecallAdapter();
+        vm.expectRevert(AdapterRegistry.AdapterDelegatecallForbidden.selector);
+        registry.registerAdapter(address(proxyLikeAdapter), "delegatecall-proxy", false);
     }
 
     function test_RejectUnsupportedPairAndInputAboveCap() public {

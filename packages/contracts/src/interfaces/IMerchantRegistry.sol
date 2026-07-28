@@ -14,6 +14,10 @@ interface IMerchantRegistry {
 
     function getMerchant(address merchant) external view returns (Merchant memory);
 
+    function merchantForAdmin(address admin) external view returns (address merchant);
+
+    function pendingAdmin(address merchant) external view returns (address);
+
     function isAuthorizedIntentSigner(address merchant, address signer) external view returns (bool);
 
     function isAuthorizedRefundOperator(address merchant, address operator) external view returns (bool);

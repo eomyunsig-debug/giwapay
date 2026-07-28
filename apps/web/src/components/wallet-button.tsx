@@ -6,8 +6,30 @@ import { useAccount, useConnect, useDisconnect, useSwitchChain } from 'wagmi';
 
 import { GIWA_SEPOLIA_CHAIN_ID } from '@giwapay/chains';
 import { shortAddress } from '@/lib/format';
+import { useGiwaPayLocale } from './language-toggle';
 
 export function WalletButton({ compact = false }: { compact?: boolean }) {
+  const locale = useGiwaPayLocale();
+  const text =
+    locale === 'ko'
+      ? {
+          connected: '연결된 지갑',
+          switchNetwork: 'GIWA Sepolia로 전환',
+          disconnect: '연결 해제',
+          connecting: '연결 중…',
+          connect: '지갑 연결',
+          choose: '지갑 선택',
+          install: 'EIP-1193 호환 지갑을 설치하세요.',
+        }
+      : {
+          connected: 'Connected wallet',
+          switchNetwork: 'Switch to GIWA Sepolia',
+          disconnect: 'Disconnect',
+          connecting: 'Connecting…',
+          connect: 'Connect wallet',
+          choose: 'Choose a wallet',
+          install: 'Install an EIP-1193 compatible wallet.',
+        };
   const [open, setOpen] = useState(false);
   const { address, isConnected, chainId } = useAccount();
   const { connectors, connect, isPending, error } = useConnect();
@@ -30,7 +52,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
         </button>
         {open ? (
           <div className="wallet-popover">
-            <p className="popover-label">Connected wallet</p>
+            <p className="popover-label">{text.connected}</p>
             <p className="wallet-address">{address}</p>
             {wrongChain ? (
               <button
@@ -40,7 +62,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
                 disabled={isSwitching}
               >
                 <LoaderCircle className={isSwitching ? 'spin' : ''} size={15} />
-                Switch to GIWA Sepolia
+                {text.switchNetwork}
               </button>
             ) : (
               <p className="popover-ok">
@@ -55,7 +77,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
                 setOpen(false);
               }}
             >
-              <LogOut size={15} /> Disconnect
+              <LogOut size={15} /> {text.disconnect}
             </button>
           </div>
         ) : null}
@@ -73,11 +95,11 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
         aria-expanded={open}
       >
         {isPending ? <LoaderCircle className="spin" size={16} /> : <Wallet size={16} />}
-        <span>{isPending ? 'Connecting…' : 'Connect wallet'}</span>
+        <span>{isPending ? text.connecting : text.connect}</span>
       </button>
       {open ? (
         <div className="wallet-popover wallet-popover--connectors">
-          <p className="popover-label">Choose a wallet</p>
+          <p className="popover-label">{text.choose}</p>
           {connectors.map((connector) => (
             <button
               type="button"
@@ -91,9 +113,7 @@ export function WalletButton({ compact = false }: { compact?: boolean }) {
               {connector.name}
             </button>
           ))}
-          {connectors.length === 0 ? (
-            <p className="popover-empty">Install an EIP-1193 compatible wallet.</p>
-          ) : null}
+          {connectors.length === 0 ? <p className="popover-empty">{text.install}</p> : null}
           {error ? (
             <p className="popover-error" role="alert">
               {error.message}
