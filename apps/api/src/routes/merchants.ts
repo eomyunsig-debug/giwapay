@@ -71,11 +71,12 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
     async (request) => {
       const principal = request.principal;
       if (!principal) throw new Error('Authentication pre-handler did not run');
+      const requiredDelegatedSignerAddress = await services.intentSigner.addressForMerchant(
+        principal.merchant,
+      );
       return {
         merchant: serializeMerchant(principal.merchant),
-        requiredDelegatedSignerAddress:
-          services.intentSigner.addressForMerchant(principal.merchant.onchainMerchantAddress) ??
-          null,
+        requiredDelegatedSignerAddress: requiredDelegatedSignerAddress ?? null,
       };
     },
   );

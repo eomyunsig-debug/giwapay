@@ -156,7 +156,9 @@ const rawSchema = z.object({
   MERCHANT_REGISTRY_ADDRESS: address.optional(),
   ADAPTER_REGISTRY_ADDRESS: address.optional(),
   PAYMENT_INTENT_SIGNER_PRIVATE_KEY: privateKey.optional(),
+  PAYMENT_INTENT_SIGNER_SOURCE: z.enum(['database', 'environment']).optional(),
   PAYMENT_INTENT_SIGNER_KEYS_JSON: z.string().optional(),
+  PAYMENT_INTENT_SIGNER_CACHE_TTL_MS: z.coerce.number().int().min(250).max(60_000).default(5_000),
   AWS_REGION: z.string().trim().min(1).max(100).optional(),
   AWS_KMS_ENDPOINT: z.string().url().optional(),
   AWS_KMS_READINESS_KEY_ID: z.string().trim().min(1).max(2_048).optional(),
@@ -220,6 +222,9 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
 
   const supportedPaymentTokens = parsePaymentTokens(raw.SUPPORTED_PAYMENT_TOKENS_JSON);
   const paymentIntentSignerKeys = parsePaymentIntentSignerKeys(raw.PAYMENT_INTENT_SIGNER_KEYS_JSON);
+  const paymentIntentSignerSource =
+    raw.PAYMENT_INTENT_SIGNER_SOURCE ??
+    (raw.NODE_ENV === 'production' ? 'database' : 'environment');
   if (raw.NODE_ENV === 'production' && raw.ALLOW_TEST_CONTRACTS) {
     throw new Error('ALLOW_TEST_CONTRACTS=true is forbidden in production');
   }
@@ -229,6 +234,11 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
   if (raw.NODE_ENV === 'production' && raw.PAYMENT_INTENT_SIGNER_PRIVATE_KEY) {
     throw new Error(
       'PAYMENT_INTENT_SIGNER_PRIVATE_KEY is development-only; configure per-merchant AWS KMS keys',
+    );
+  }
+  if (paymentIntentSignerSource === 'database' && paymentIntentSignerKeys.length > 0) {
+    throw new Error(
+      'PAYMENT_INTENT_SIGNER_KEYS_JSON requires PAYMENT_INTENT_SIGNER_SOURCE=environment',
     );
   }
   if (paymentIntentSignerKeys.length > 0 && !raw.AWS_REGION) {
@@ -253,6 +263,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
     rpcFallbackUrls: csv(raw.GIWA_RPC_FALLBACK_URLS),
     supportedPaymentTokens,
     paymentIntentSignerKeys,
+    paymentIntentSignerSource,
     exposeApiDocs: raw.EXPOSE_API_DOCS ?? raw.NODE_ENV !== 'production',
     sessionSecrets: {
       sessionToken: derivePurposeSecret(raw.SESSION_SECRET, 'session-token'),

@@ -5,6 +5,7 @@ import { createDatabase } from '@giwapay/db';
 import { buildApp } from './app.js';
 import { createChainClient } from './chain.js';
 import { loadConfig } from './env.js';
+import { DatabaseMerchantSignerKeyStore } from './signer-key-store.js';
 import { PaymentIntentSigner } from './signer.js';
 
 const config = loadConfig();
@@ -14,7 +15,11 @@ const app = await buildApp({
   db: database.db,
   pool: database.pool,
   chainClient: createChainClient(config),
-  intentSigner: new PaymentIntentSigner(config),
+  intentSigner: new PaymentIntentSigner(
+    config,
+    undefined,
+    new DatabaseMerchantSignerKeyStore(database.db),
+  ),
 });
 
 const shutdown = async (signal: string) => {

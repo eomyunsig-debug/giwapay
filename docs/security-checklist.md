@@ -9,6 +9,10 @@
 - [ ] Production deployment rejects test-only tokens and adapters.
 - [ ] Two independent, authenticated RPC endpoints are configured.
 - [ ] API/session/webhook/signer secrets come from a secret manager.
+- [ ] Only the provisioning operator can write `merchant_signer_keys`; the API
+      runtime receives only the minimum read permission.
+- [ ] Provisioning-derived signer addresses match confirmed
+      `MerchantRegistry` delegated signers before API keys are issued.
 - [ ] Cookie domain, allowed origin, public URLs and proxy trust are reviewed.
 - [ ] PostgreSQL TLS, backups, retention and least-privilege roles are enabled.
 - [ ] Indexer confirmation depth, starting block and reorg alerts are reviewed.

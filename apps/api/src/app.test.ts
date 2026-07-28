@@ -25,7 +25,7 @@ function services(exposeApiDocs: boolean): AppServices {
     pool: {} as Pool,
     chainClient: {} as AppServices['chainClient'],
     intentSigner: {
-      addressForMerchant: () => undefined,
+      addressForMerchant: async () => undefined,
       readiness: async () => false,
       verifyMerchantSigner: async () => {
         throw new Error('not configured');

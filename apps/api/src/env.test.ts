@@ -122,6 +122,27 @@ describe('configuration', () => {
     ).toThrow(/must not reuse/);
   });
 
+  it('defaults production signer mappings to PostgreSQL and keeps env mappings explicit', () => {
+    expect(loadConfig({ ...base, NODE_ENV: 'production' }).paymentIntentSignerSource).toBe(
+      'database',
+    );
+    expect(loadConfig(base).paymentIntentSignerSource).toBe('environment');
+    expect(() =>
+      loadConfig({
+        ...base,
+        PAYMENT_INTENT_SIGNER_SOURCE: 'database',
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
+          {
+            merchant: `0x${'11'.repeat(20)}`,
+            provider: 'aws-kms',
+            keyId: 'alias/giwapay-legacy',
+            address: `0x${'aa'.repeat(20)}`,
+          },
+        ]),
+      }),
+    ).toThrow(/requires PAYMENT_INTENT_SIGNER_SOURCE=environment/);
+  });
+
   it('rejects chain-bound configuration outside uint256 and token decimals above 36', () => {
     const token = {
       token: '0x0000000000000000000000000000000000000001',

@@ -19,8 +19,10 @@ import {
 import { privateKeyToAccount, publicKeyToAddress } from 'viem/accounts';
 
 import { paymentIntentTypes } from './abi.js';
+import { AsyncTtlCache } from './cache.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
+import type { MerchantSignerKey, MerchantSignerKeyStore } from './signer-key-store.js';
 
 export type UnsignedPaymentIntent = {
   intentId: `0x${string}`;
@@ -50,7 +52,7 @@ type SignedPaymentIntent = {
 };
 
 export interface IntentSignerProvider {
-  addressForMerchant(merchantAddress: string): `0x${string}` | undefined;
+  addressForMerchant(merchant: Merchant): Promise<`0x${string}` | undefined>;
   readiness(): Promise<boolean>;
   verifyMerchantSigner(merchant: Merchant): Promise<void>;
   sign(merchant: Merchant, message: UnsignedPaymentIntent): Promise<SignedPaymentIntent>;
@@ -123,7 +125,7 @@ async function serializeRecoverableSignature(
   throw new Error('KMS signature does not match the configured signer address');
 }
 
-function kmsPublicKeyAddress(publicKey: Uint8Array): Address {
+export function kmsPublicKeyAddress(publicKey: Uint8Array): Address {
   const key = createPublicKey({
     key: Buffer.from(publicKey),
     format: 'der',
@@ -144,10 +146,13 @@ export class PaymentIntentSigner implements IntentSignerProvider {
   readonly #localAccount;
   readonly #kmsClient?: KMSClient;
   readonly #kmsKeys: Map<string, { keyId: string; address: `0x${string}` }>;
+  readonly #keyStore: MerchantSignerKeyStore | undefined;
+  readonly #keyCache = new AsyncTtlCache<MerchantSignerKey | undefined>(10_000);
   #readiness: { promise: Promise<boolean>; expiresAt: number } | undefined;
 
-  public constructor(config: AppConfig, kmsClient?: KMSClient) {
+  public constructor(config: AppConfig, kmsClient?: KMSClient, keyStore?: MerchantSignerKeyStore) {
     this.#config = config;
+    this.#keyStore = keyStore;
     this.#localAccount = config.PAYMENT_INTENT_SIGNER_PRIVATE_KEY
       ? privateKeyToAccount(config.PAYMENT_INTENT_SIGNER_PRIVATE_KEY)
       : undefined;
@@ -157,13 +162,14 @@ export class PaymentIntentSigner implements IntentSignerProvider {
         { keyId: entry.keyId, address: entry.address },
       ]),
     );
-    if (this.#kmsKeys.size > 0) {
-      this.#kmsClient =
-        kmsClient ??
-        new KMSClient({
-          region: config.AWS_REGION!,
-          ...(config.AWS_KMS_ENDPOINT ? { endpoint: config.AWS_KMS_ENDPOINT } : {}),
-        });
+    const usesKms = config.paymentIntentSignerSource === 'database' || this.#kmsKeys.size > 0;
+    if (kmsClient) {
+      this.#kmsClient = kmsClient;
+    } else if (usesKms && config.AWS_REGION) {
+      this.#kmsClient = new KMSClient({
+        region: config.AWS_REGION!,
+        ...(config.AWS_KMS_ENDPOINT ? { endpoint: config.AWS_KMS_ENDPOINT } : {}),
+      });
     }
   }
 
@@ -172,10 +178,32 @@ export class PaymentIntentSigner implements IntentSignerProvider {
     return this.#localAccount?.address.toLowerCase() as `0x${string}` | undefined;
   }
 
-  public addressForMerchant(merchantAddress: string): `0x${string}` | undefined {
+  async #kmsKeyForMerchant(merchant: Merchant): Promise<MerchantSignerKey | undefined> {
+    if (this.#config.paymentIntentSignerSource === 'environment') {
+      const configured = this.#kmsKeys.get(merchant.onchainMerchantAddress.toLowerCase());
+      return configured ? { provider: 'aws-kms', ...configured } : undefined;
+    }
+    if (!this.#keyStore) return undefined;
+    try {
+      return await this.#keyCache.get(
+        merchant.id,
+        this.#config.PAYMENT_INTENT_SIGNER_CACHE_TTL_MS,
+        () => this.#keyStore!.getByMerchantId(merchant.id),
+      );
+    } catch (error) {
+      throw new HttpError(
+        503,
+        'intent_signer_unavailable',
+        'The merchant signer mapping could not be loaded',
+        { cause: error },
+      );
+    }
+  }
+
+  public async addressForMerchant(merchant: Merchant): Promise<`0x${string}` | undefined> {
+    const kmsKey = await this.#kmsKeyForMerchant(merchant);
     return (
-      this.#kmsKeys.get(merchantAddress.toLowerCase())?.address ??
-      (this.#localAccount?.address.toLowerCase() as `0x${string}` | undefined)
+      kmsKey?.address ?? (this.#localAccount?.address.toLowerCase() as `0x${string}` | undefined)
     );
   }
 
@@ -204,7 +232,14 @@ export class PaymentIntentSigner implements IntentSignerProvider {
   }
 
   async #checkReadiness(): Promise<boolean> {
-    if (this.#kmsKeys.size === 0) return Boolean(this.#localAccount);
+    const usesKms = this.#config.paymentIntentSignerSource === 'database' || this.#kmsKeys.size > 0;
+    if (!usesKms) return Boolean(this.#localAccount);
+    if (
+      this.#config.paymentIntentSignerSource === 'database' &&
+      (!this.#keyStore || !(await this.#keyStore.readiness()))
+    ) {
+      return false;
+    }
     if (!this.#kmsClient || !this.#config.AWS_KMS_READINESS_KEY_ID) return false;
     const result = await this.#kmsClient.send(
       new DescribeKeyCommand({ KeyId: this.#config.AWS_KMS_READINESS_KEY_ID }),
@@ -218,7 +253,9 @@ export class PaymentIntentSigner implements IntentSignerProvider {
   }
 
   public async verifyMerchantSigner(merchant: Merchant): Promise<void> {
-    const expectedAddress = this.addressForMerchant(merchant.onchainMerchantAddress);
+    const kmsKey = await this.#kmsKeyForMerchant(merchant);
+    const expectedAddress =
+      kmsKey?.address ?? (this.#localAccount?.address.toLowerCase() as `0x${string}` | undefined);
     if (!expectedAddress) {
       throw new HttpError(
         503,
@@ -234,7 +271,6 @@ export class PaymentIntentSigner implements IntentSignerProvider {
       );
     }
 
-    const kmsKey = this.#kmsKeys.get(merchant.onchainMerchantAddress.toLowerCase());
     if (!kmsKey) return;
     if (!this.#kmsClient) {
       throw new HttpError(503, 'intent_signer_unavailable', 'AWS KMS is not configured');
@@ -263,7 +299,9 @@ export class PaymentIntentSigner implements IntentSignerProvider {
 
   public async sign(merchant: Merchant, message: UnsignedPaymentIntent) {
     const routerAddress = this.#config.PAYMENT_ROUTER_ADDRESS;
-    const expectedAddress = this.addressForMerchant(merchant.onchainMerchantAddress);
+    const kmsKey = await this.#kmsKeyForMerchant(merchant);
+    const expectedAddress =
+      kmsKey?.address ?? (this.#localAccount?.address.toLowerCase() as `0x${string}` | undefined);
     if (!expectedAddress || !routerAddress) {
       throw new HttpError(
         503,
@@ -291,7 +329,6 @@ export class PaymentIntentSigner implements IntentSignerProvider {
       verifyingContract: routerAddress,
     } as const;
     let signature: Hex;
-    const kmsKey = this.#kmsKeys.get(merchant.onchainMerchantAddress.toLowerCase());
     if (kmsKey) {
       if (!this.#kmsClient) {
         throw new HttpError(503, 'intent_signer_unavailable', 'AWS KMS is not configured');

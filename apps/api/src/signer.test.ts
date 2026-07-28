@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { paymentIntentTypes, zeroAddress, zeroBytes32 } from './abi.js';
 import { loadConfig } from './env.js';
+import type { MerchantSignerKeyStore } from './signer-key-store.js';
 import { parseKmsDerSignature, PaymentIntentSigner, type UnsignedPaymentIntent } from './signer.js';
 
 const router = `0x${'11'.repeat(20)}` as const;
@@ -104,7 +105,9 @@ describe('PaymentIntent signer providers', () => {
       baseConfig({ PAYMENT_INTENT_SIGNER_PRIVATE_KEY: privateKey }),
     );
 
-    expect(signer.addressForMerchant(merchantAddress)).toBe(account.address.toLowerCase());
+    expect(
+      await signer.addressForMerchant(merchant(account.address.toLowerCase() as `0x${string}`)),
+    ).toBe(account.address.toLowerCase());
     expect(await signer.readiness()).toBe(true);
     const signed = await signer.sign(
       merchant(account.address.toLowerCase() as `0x${string}`),
@@ -264,6 +267,77 @@ describe('PaymentIntent signer providers', () => {
       true,
     ]);
     expect(calls).toBe(1);
+  });
+
+  it('loads and caches a merchant signer mapping from the database store', async () => {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const config = baseConfig({
+      PAYMENT_INTENT_SIGNER_SOURCE: 'database',
+      PAYMENT_INTENT_SIGNER_CACHE_TTL_MS: '5000',
+      AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
+    });
+    let calls = 0;
+    const keyStore: MerchantSignerKeyStore = {
+      readiness: async () => true,
+      getByMerchantId: async () => {
+        calls += 1;
+        return {
+          provider: 'aws-kms',
+          keyId: 'alias/giwapay-database-merchant',
+          address: account.address.toLowerCase() as `0x${string}`,
+        };
+      },
+    };
+    const signer = new PaymentIntentSigner(config, undefined, keyStore);
+    const currentMerchant = merchant(account.address.toLowerCase() as `0x${string}`);
+
+    await expect(signer.addressForMerchant(currentMerchant)).resolves.toBe(
+      account.address.toLowerCase(),
+    );
+    await expect(signer.addressForMerchant(currentMerchant)).resolves.toBe(
+      account.address.toLowerCase(),
+    );
+    expect(calls).toBe(1);
+  });
+
+  it('keeps database signer mode unready when the mapping store is unavailable', async () => {
+    const config = baseConfig({
+      PAYMENT_INTENT_SIGNER_SOURCE: 'database',
+      AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
+    });
+    let kmsCalls = 0;
+    const fakeKms = {
+      send: async () => {
+        kmsCalls += 1;
+        throw new Error('KMS should not run before the signer table probe');
+      },
+    } as unknown as KMSClient;
+    const signer = new PaymentIntentSigner(config, fakeKms);
+
+    await expect(signer.readiness()).resolves.toBe(false);
+    expect(kmsCalls).toBe(0);
+  });
+
+  it('fails closed when the database signer mapping cannot be read', async () => {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const config = baseConfig({
+      PAYMENT_INTENT_SIGNER_SOURCE: 'database',
+      AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
+    });
+    const keyStore: MerchantSignerKeyStore = {
+      readiness: async () => true,
+      getByMerchantId: async () => {
+        throw new Error('database unavailable');
+      },
+    };
+    const signer = new PaymentIntentSigner(config, undefined, keyStore);
+
+    await expect(
+      signer.addressForMerchant(merchant(account.address.toLowerCase() as `0x${string}`)),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'intent_signer_unavailable' });
   });
 
   it('verifies the configured merchant key during onboarding', async () => {

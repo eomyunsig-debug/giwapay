@@ -58,7 +58,8 @@ deployment platform. Required production boundaries include:
 - exact verified router, merchant registry, and adapter registry addresses;
 - platform fee bps matching the immutable router value;
 - supported token/route JSON matching on-chain adapter metadata;
-- a delegated PaymentIntent signer whose address each merchant registers;
+- `PAYMENT_INTENT_SIGNER_SOURCE=database`, a dedicated KMS readiness key, and
+  one operator-provisioned non-exportable KMS signer mapping per merchant;
 - PostgreSQL TLS/backup settings;
 - strong independent session, API-key pepper, and 32-byte webhook encryption
   keys;
@@ -80,6 +81,9 @@ session-wallet ownership from the pre-existing admin relationship before
 adding non-null and uniqueness constraints. Before applying pending migrations
 to retained data, take a tested backup, review the migration sequence, and
 stop chain projection/webhook delivery for the maintenance window.
+`0003_merchant_signer_keys.sql` adds the non-secret KMS key-ID/public-address
+mapping table. Apply it before starting an API image configured with the
+database signer source.
 
 ## Containers
 

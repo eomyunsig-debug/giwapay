@@ -637,9 +637,7 @@ export async function registerPaymentIntentRoutes(app: FastifyInstance, services
         ),
       );
       const metadataHash = requestedMetadataHash;
-      const signerAddress = services.intentSigner.addressForMerchant(
-        merchant.onchainMerchantAddress,
-      );
+      const signerAddress = await services.intentSigner.addressForMerchant(merchant);
       if (!signerAddress) {
         throw new HttpError(
           503,
