@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "React provider, hooks, and hosted checkout button for GiwaPay",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eomyunsig-debug/giwapay.git",
+    "directory": "packages/react"
+  },
+  "homepage": "https://github.com/eomyunsig-debug/giwapay/tree/main/packages/react",
+  "bugs": {
+    "url": "https://github.com/eomyunsig-debug/giwapay/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "files": [

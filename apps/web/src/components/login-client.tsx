@@ -33,16 +33,14 @@ export function LoginClient() {
 
       setStage('nonce');
       const nonce = await giwaPayClient.createAuthNonce(address);
-      const origin = window.location.origin;
       const message = createSiweMessage({
         address,
-        chainId: GIWA_SEPOLIA_CHAIN_ID,
-        domain: window.location.host,
+        chainId: nonce.chainId,
+        domain: nonce.domain,
         nonce: nonce.nonce,
-        uri: origin,
+        uri: nonce.uri,
         version: '1',
-        statement:
-          'Sign in to GiwaPay. This request does not trigger a transaction or grant access to your funds.',
+        statement: nonce.statement,
         issuedAt: new Date(nonce.issuedAt),
         expirationTime: new Date(nonce.expirationTime),
       });

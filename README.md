@@ -12,6 +12,14 @@ registry-owned merchant split, pays the fixed platform fee, and refunds unused
 input. The backend accepts success only after its independent,
 confirmation-aware indexer verifies the canonical router event.
 
+Public review links:
+
+- showcase: <https://giwapay-mvp.eomyunsig.chatgpt.site>
+- source: <https://github.com/eomyunsig-debug/giwapay>
+
+The public showcase is intentionally non-transactional. It does not imply that
+GIWA Sepolia contracts or the payment backend are live.
+
 This repository is **not audited or production-ready**, has no official GIWA
 partnership, and makes no claim of fiat, gasless, regulatory, mainnet, or
 production-DEX support.

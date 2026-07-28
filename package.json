@@ -4,6 +4,14 @@
   "private": true,
   "description": "Non-custodial exact-settlement payment orchestration for GIWA",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eomyunsig-debug/giwapay.git"
+  },
+  "homepage": "https://giwapay-mvp.eomyunsig.chatgpt.site",
+  "bugs": {
+    "url": "https://github.com/eomyunsig-debug/giwapay/issues"
+  },
   "packageManager": "pnpm@11.9.0",
   "engines": {
     "node": ">=24.0.0",

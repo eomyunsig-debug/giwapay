@@ -1,5 +1,7 @@
 .next
 .turbo
+.vinext
+.wrangler
 *.tsbuildinfo
 AGENTS.md
 coverage

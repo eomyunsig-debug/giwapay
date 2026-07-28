@@ -12,8 +12,9 @@ GIWA Sepolia only. Mainnet deployment is intentionally absent.
 ## Reporting a vulnerability
 
 Do not open a public issue containing exploit details, credentials, wallet
-material, or personal data. Contact the repository owner through a private
-channel and include:
+material, or personal data. Use GitHub's private
+[security advisory report](https://github.com/eomyunsig-debug/giwapay/security/advisories/new)
+and include:
 
 - affected component and revision;
 - minimum reproduction without real funds or secrets;
