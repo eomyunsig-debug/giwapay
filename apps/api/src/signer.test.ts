@@ -1,10 +1,15 @@
 import { createPublicKey } from 'node:crypto';
 
-import { GetPublicKeyCommand, SignCommand, type KMSClient } from '@aws-sdk/client-kms';
+import {
+  DescribeKeyCommand,
+  GetPublicKeyCommand,
+  SignCommand,
+  type KMSClient,
+} from '@aws-sdk/client-kms';
 import type { Merchant } from '@giwapay/db';
 import { hashTypedData, parseSignature, recoverAddress, toBytes, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { paymentIntentTypes, zeroAddress, zeroBytes32 } from './abi.js';
 import { loadConfig } from './env.js';
@@ -133,6 +138,7 @@ describe('PaymentIntent signer providers', () => {
     const account = privateKeyToAccount(privateKey);
     const config = baseConfig({
       AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
       PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
         {
           merchant: merchantAddress,
@@ -168,11 +174,13 @@ describe('PaymentIntent signer providers', () => {
     ).toBe(account.address.toLowerCase());
   });
 
-  it('retries readiness after a transient KMS failure and caches only success', async () => {
+  it('bounds failed KMS readiness probes with a short negative TTL', async () => {
+    vi.useFakeTimers();
     const privateKey = generatePrivateKey();
     const account = privateKeyToAccount(privateKey);
     const config = baseConfig({
       AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
       PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
         {
           merchant: merchantAddress,
@@ -184,10 +192,99 @@ describe('PaymentIntent signer providers', () => {
     });
     let calls = 0;
     const fakeKms = {
+      send: async (command: DescribeKeyCommand) => {
+        if (!(command instanceof DescribeKeyCommand)) throw new Error('Unexpected KMS command');
+        calls += 1;
+        if (calls === 1) throw new Error('transient KMS network failure');
+        return {
+          KeyMetadata: {
+            Enabled: true,
+            KeySpec: 'ECC_SECG_P256K1',
+            KeyUsage: 'SIGN_VERIFY',
+          },
+        };
+      },
+    } as unknown as KMSClient;
+    const signer = new PaymentIntentSigner(config, fakeKms);
+
+    try {
+      await expect(signer.readiness()).resolves.toBe(false);
+      await expect(signer.readiness()).resolves.toBe(false);
+      expect(calls).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(signer.readiness()).resolves.toBe(true);
+      await expect(signer.readiness()).resolves.toBe(true);
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses one dedicated KMS probe instead of checking every merchant key', async () => {
+    const accountA = privateKeyToAccount(generatePrivateKey());
+    const accountB = privateKeyToAccount(generatePrivateKey());
+    const merchantB = `0x${'77'.repeat(20)}` as const;
+    const config = baseConfig({
+      AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
+      PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
+        {
+          merchant: merchantAddress,
+          provider: 'aws-kms',
+          keyId: 'alias/giwapay-merchant-a',
+          address: accountA.address,
+        },
+        {
+          merchant: merchantB,
+          provider: 'aws-kms',
+          keyId: 'alias/giwapay-merchant-b',
+          address: accountB.address,
+        },
+      ]),
+    });
+    let calls = 0;
+    const fakeKms = {
+      send: async (command: DescribeKeyCommand) => {
+        if (!(command instanceof DescribeKeyCommand)) throw new Error('Unexpected KMS command');
+        calls += 1;
+        return {
+          KeyMetadata: {
+            Enabled: true,
+            KeySpec: 'ECC_SECG_P256K1',
+            KeyUsage: 'SIGN_VERIFY',
+          },
+        };
+      },
+    } as unknown as KMSClient;
+    const signer = new PaymentIntentSigner(config, fakeKms);
+
+    await expect(Promise.all([signer.readiness(), signer.readiness()])).resolves.toEqual([
+      true,
+      true,
+    ]);
+    expect(calls).toBe(1);
+  });
+
+  it('verifies the configured merchant key during onboarding', async () => {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const config = baseConfig({
+      AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
+      PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
+        {
+          merchant: merchantAddress,
+          provider: 'aws-kms',
+          keyId: 'alias/giwapay-onboarding-test',
+          address: account.address,
+        },
+      ]),
+    });
+    let calls = 0;
+    const fakeKms = {
       send: async (command: GetPublicKeyCommand) => {
         if (!(command instanceof GetPublicKeyCommand)) throw new Error('Unexpected KMS command');
         calls += 1;
-        if (calls === 1) throw new Error('transient KMS network failure');
         return {
           KeySpec: 'ECC_SECG_P256K1',
           KeyUsage: 'SIGN_VERIFY',
@@ -197,10 +294,44 @@ describe('PaymentIntent signer providers', () => {
     } as unknown as KMSClient;
     const signer = new PaymentIntentSigner(config, fakeKms);
 
-    await expect(signer.readiness()).resolves.toBe(false);
-    await expect(signer.readiness()).resolves.toBe(true);
-    await expect(signer.readiness()).resolves.toBe(true);
-    expect(calls).toBe(2);
+    await expect(
+      signer.verifyMerchantSigner(merchant(account.address.toLowerCase() as `0x${string}`)),
+    ).resolves.toBeUndefined();
+    expect(calls).toBe(1);
+  });
+
+  it('fails only the merchant whose onboarding key resolves to another address', async () => {
+    const configuredAccount = privateKeyToAccount(generatePrivateKey());
+    const actualAccount = privateKeyToAccount(generatePrivateKey());
+    const config = baseConfig({
+      AWS_REGION: 'ap-northeast-2',
+      AWS_KMS_READINESS_KEY_ID: 'alias/giwapay-readiness',
+      PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
+        {
+          merchant: merchantAddress,
+          provider: 'aws-kms',
+          keyId: 'alias/giwapay-mismatched-merchant',
+          address: configuredAccount.address,
+        },
+      ]),
+    });
+    const fakeKms = {
+      send: async (command: GetPublicKeyCommand) => {
+        if (!(command instanceof GetPublicKeyCommand)) throw new Error('Unexpected KMS command');
+        return {
+          KeySpec: 'ECC_SECG_P256K1',
+          KeyUsage: 'SIGN_VERIFY',
+          PublicKey: spkiPublicKey(actualAccount.publicKey),
+        };
+      },
+    } as unknown as KMSClient;
+    const signer = new PaymentIntentSigner(config, fakeKms);
+
+    await expect(
+      signer.verifyMerchantSigner(
+        merchant(configuredAccount.address.toLowerCase() as `0x${string}`),
+      ),
+    ).rejects.toMatchObject({ statusCode: 503, code: 'intent_signer_unavailable' });
   });
 
   it('rejects malformed or out-of-range KMS signatures', () => {

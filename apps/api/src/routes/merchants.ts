@@ -125,6 +125,7 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
       const principal = request.principal;
       if (!principal) throw new Error('Authentication pre-handler did not run');
       const merchant = await refreshMerchantRegistration(services, principal.merchant);
+      await services.intentSigner.verifyMerchantSigner(merchant);
       return { merchant: serializeMerchant(merchant) };
     },
   );
@@ -209,6 +210,7 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
           'This API key secret was already issued and cannot be replayed; use a new idempotency key',
         );
       }
+      await services.intentSigner.verifyMerchantSigner(verifiedMerchant);
       const rawKey = `gwp_test_${randomToken(32)}`;
       const [key] = await services.db
         .insert(apiKeys)

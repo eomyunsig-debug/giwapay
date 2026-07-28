@@ -27,6 +27,15 @@ deletes a webhook event with a pending/retry/processing delivery. Configure
 - `/health` proves only that the API process is alive.
 - `/ready` must report database, chain ID, contract configuration, signer, and
   adapter dependencies as ready before traffic.
+- KMS readiness performs one `DescribeKey` against the dedicated
+  `AWS_KMS_READINESS_KEY_ID`, regardless of merchant count. Successful probes
+  are cached for 30 seconds and failures for 3 seconds so a KMS incident cannot
+  turn a frequent readiness probe into unbounded request fanout. Readiness,
+  onboarding verification, and signing KMS requests share the bounded
+  `AWS_KMS_TIMEOUT_MS`.
+- Per-merchant `GetPublicKey` and Ethereum-address verification runs during
+  registration verification and API-key onboarding. A bad merchant key fails
+  that merchant closed without removing the entire API replica from service.
 
 Alert on:
 
@@ -71,10 +80,16 @@ changing it without migration makes endpoints unusable.
   `ECC_SECG_P256K1` key per merchant. `PAYMENT_INTENT_SIGNER_KEYS_JSON` binds
   each stable merchant address to a distinct KMS key ID and expected Ethereum
   address; duplicate key IDs fail configuration.
+- `AWS_KMS_READINESS_KEY_ID` identifies a dedicated enabled
+  `ECC_SECG_P256K1` probe key. Grant the API `kms:DescribeKey` for this key;
+  do not reuse a merchant signing key or include it in
+  `PAYMENT_INTENT_SIGNER_KEYS_JSON`.
 - Rotate one merchant at a time: provision the replacement KMS key, verify its
   derived address, have the merchant rotate the delegated signer on-chain,
-  update the merchant's configured key binding, then verify `/ready` before
-  disabling the old KMS key. Never reuse a KMS key between merchants.
+  update the merchant's configured key binding, then call registration
+  verification and create a scoped API key before disabling the old KMS key.
+  `/ready` verifies only the dedicated KMS probe, not every merchant binding.
+  Never reuse a KMS key between merchants.
 - `PAYMENT_INTENT_SIGNER_PRIVATE_KEY` is retained only for local/testnet demo
   workflows and is rejected when `NODE_ENV=production`.
 - Contract owner/adapter-manager transfer uses the on-chain two-step flow and

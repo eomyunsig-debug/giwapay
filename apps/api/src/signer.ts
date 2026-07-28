@@ -1,6 +1,11 @@
 import { createPublicKey } from 'node:crypto';
 
-import { GetPublicKeyCommand, KMSClient, SignCommand } from '@aws-sdk/client-kms';
+import {
+  DescribeKeyCommand,
+  GetPublicKeyCommand,
+  KMSClient,
+  SignCommand,
+} from '@aws-sdk/client-kms';
 import type { Merchant } from '@giwapay/db';
 import {
   bytesToHex,
@@ -47,12 +52,14 @@ type SignedPaymentIntent = {
 export interface IntentSignerProvider {
   addressForMerchant(merchantAddress: string): `0x${string}` | undefined;
   readiness(): Promise<boolean>;
+  verifyMerchantSigner(merchant: Merchant): Promise<void>;
   sign(merchant: Merchant, message: UnsignedPaymentIntent): Promise<SignedPaymentIntent>;
 }
 
 const secp256k1Order = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const secp256k1HalfOrder = secp256k1Order / 2n;
 const readinessSuccessTtlMs = 30_000;
+const readinessFailureTtlMs = 3_000;
 
 function readDerLength(bytes: Uint8Array, offset: number): [number, number] {
   const first = bytes[offset];
@@ -181,15 +188,14 @@ export class PaymentIntentSigner implements IntentSignerProvider {
     const promise = this.#checkReadiness().then(
       (ready) => {
         if (this.#readiness?.promise !== promise) return ready;
-        if (ready) {
-          this.#readiness.expiresAt = Date.now() + readinessSuccessTtlMs;
-        } else {
-          this.#readiness = undefined;
-        }
+        this.#readiness.expiresAt =
+          Date.now() + (ready ? readinessSuccessTtlMs : readinessFailureTtlMs);
         return ready;
       },
       () => {
-        if (this.#readiness?.promise === promise) this.#readiness = undefined;
+        if (this.#readiness?.promise === promise) {
+          this.#readiness.expiresAt = Date.now() + readinessFailureTtlMs;
+        }
         return false;
       },
     );
@@ -199,19 +205,60 @@ export class PaymentIntentSigner implements IntentSignerProvider {
 
   async #checkReadiness(): Promise<boolean> {
     if (this.#kmsKeys.size === 0) return Boolean(this.#localAccount);
-    if (!this.#kmsClient) return false;
-    const checks = [...this.#kmsKeys.values()].map(async (entry) => {
-      const result = await this.#kmsClient!.send(new GetPublicKeyCommand({ KeyId: entry.keyId }));
+    if (!this.#kmsClient || !this.#config.AWS_KMS_READINESS_KEY_ID) return false;
+    const result = await this.#kmsClient.send(
+      new DescribeKeyCommand({ KeyId: this.#config.AWS_KMS_READINESS_KEY_ID }),
+      { abortSignal: AbortSignal.timeout(this.#config.AWS_KMS_TIMEOUT_MS) },
+    );
+    return (
+      result.KeyMetadata?.Enabled === true &&
+      result.KeyMetadata.KeySpec === 'ECC_SECG_P256K1' &&
+      result.KeyMetadata.KeyUsage === 'SIGN_VERIFY'
+    );
+  }
+
+  public async verifyMerchantSigner(merchant: Merchant): Promise<void> {
+    const expectedAddress = this.addressForMerchant(merchant.onchainMerchantAddress);
+    if (!expectedAddress) {
+      throw new HttpError(
+        503,
+        'intent_signer_unavailable',
+        'No signer key is configured for this merchant',
+      );
+    }
+    if (!merchant.delegatedSignerAddress || merchant.delegatedSignerAddress !== expectedAddress) {
+      throw new HttpError(
+        409,
+        'delegated_signer_mismatch',
+        "The configured signer is not the merchant's verified delegated signer",
+      );
+    }
+
+    const kmsKey = this.#kmsKeys.get(merchant.onchainMerchantAddress.toLowerCase());
+    if (!kmsKey) return;
+    if (!this.#kmsClient) {
+      throw new HttpError(503, 'intent_signer_unavailable', 'AWS KMS is not configured');
+    }
+    try {
+      const result = await this.#kmsClient.send(new GetPublicKeyCommand({ KeyId: kmsKey.keyId }), {
+        abortSignal: AbortSignal.timeout(this.#config.AWS_KMS_TIMEOUT_MS),
+      });
       if (
         result.KeySpec !== 'ECC_SECG_P256K1' ||
         result.KeyUsage !== 'SIGN_VERIFY' ||
-        !result.PublicKey
+        !result.PublicKey ||
+        kmsPublicKeyAddress(result.PublicKey).toLowerCase() !== kmsKey.address
       ) {
-        return false;
+        throw new Error('KMS key does not match the configured signer address');
       }
-      return kmsPublicKeyAddress(result.PublicKey).toLowerCase() === entry.address;
-    });
-    return (await Promise.all(checks)).every(Boolean);
+    } catch (error) {
+      throw new HttpError(
+        503,
+        'intent_signer_unavailable',
+        'The merchant PaymentIntent signer could not be verified',
+        { cause: error },
+      );
+    }
   }
 
   public async sign(merchant: Merchant, message: UnsignedPaymentIntent) {
@@ -263,6 +310,7 @@ export class PaymentIntentSigner implements IntentSignerProvider {
             MessageType: 'DIGEST',
             SigningAlgorithm: 'ECDSA_SHA_256',
           }),
+          { abortSignal: AbortSignal.timeout(this.#config.AWS_KMS_TIMEOUT_MS) },
         );
         if (!response.Signature) throw new Error('KMS returned no signature');
         signature = await serializeRecoverableSignature(digest, response.Signature, kmsKey.address);

@@ -27,6 +27,9 @@ function services(exposeApiDocs: boolean): AppServices {
     intentSigner: {
       addressForMerchant: () => undefined,
       readiness: async () => false,
+      verifyMerchantSigner: async () => {
+        throw new Error('not configured');
+      },
       sign: async () => {
         throw new Error('not configured');
       },

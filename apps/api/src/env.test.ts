@@ -77,7 +77,7 @@ describe('configuration', () => {
     ).toThrow(/development-only/);
   });
 
-  it('requires distinct per-merchant KMS handles and an AWS region', () => {
+  it('requires distinct per-merchant KMS handles, a region, and a dedicated readiness key', () => {
     const keys = [
       {
         merchant: `0x${'11'.repeat(20)}`,
@@ -105,6 +105,21 @@ describe('configuration', () => {
         PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys.slice(0, 1)),
       }),
     ).toThrow(/AWS_REGION/);
+    expect(() =>
+      loadConfig({
+        ...base,
+        AWS_REGION: 'ap-northeast-2',
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys.slice(0, 1)),
+      }),
+    ).toThrow(/AWS_KMS_READINESS_KEY_ID/);
+    expect(() =>
+      loadConfig({
+        ...base,
+        AWS_REGION: 'ap-northeast-2',
+        AWS_KMS_READINESS_KEY_ID: keys[0]!.keyId,
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys.slice(0, 1)),
+      }),
+    ).toThrow(/must not reuse/);
   });
 
   it('rejects chain-bound configuration outside uint256 and token decimals above 36', () => {

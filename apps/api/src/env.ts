@@ -159,6 +159,8 @@ const rawSchema = z.object({
   PAYMENT_INTENT_SIGNER_KEYS_JSON: z.string().optional(),
   AWS_REGION: z.string().trim().min(1).max(100).optional(),
   AWS_KMS_ENDPOINT: z.string().url().optional(),
+  AWS_KMS_READINESS_KEY_ID: z.string().trim().min(1).max(2_048).optional(),
+  AWS_KMS_TIMEOUT_MS: z.coerce.number().int().min(250).max(30_000).default(3_000),
   PLATFORM_FEE_BPS: z.coerce.number().int().min(0).max(1_000).default(50),
   SUPPORTED_PAYMENT_TOKENS_JSON: z.string().optional(),
   ALLOW_TEST_CONTRACTS: z
@@ -231,6 +233,17 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env) {
   }
   if (paymentIntentSignerKeys.length > 0 && !raw.AWS_REGION) {
     throw new Error('AWS_REGION is required when PaymentIntent KMS keys are configured');
+  }
+  if (paymentIntentSignerKeys.length > 0 && !raw.AWS_KMS_READINESS_KEY_ID) {
+    throw new Error(
+      'AWS_KMS_READINESS_KEY_ID is required when PaymentIntent KMS keys are configured',
+    );
+  }
+  if (
+    raw.AWS_KMS_READINESS_KEY_ID &&
+    paymentIntentSignerKeys.some((key) => key.keyId === raw.AWS_KMS_READINESS_KEY_ID)
+  ) {
+    throw new Error('AWS_KMS_READINESS_KEY_ID must not reuse a merchant signing key');
   }
 
   return {
