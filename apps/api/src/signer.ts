@@ -52,6 +52,7 @@ export interface IntentSignerProvider {
 
 const secp256k1Order = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const secp256k1HalfOrder = secp256k1Order / 2n;
+const readinessSuccessTtlMs = 30_000;
 
 function readDerLength(bytes: Uint8Array, offset: number): [number, number] {
   const first = bytes[offset];
@@ -136,7 +137,7 @@ export class PaymentIntentSigner implements IntentSignerProvider {
   readonly #localAccount;
   readonly #kmsClient?: KMSClient;
   readonly #kmsKeys: Map<string, { keyId: string; address: `0x${string}` }>;
-  #readiness?: Promise<boolean>;
+  #readiness: { promise: Promise<boolean>; expiresAt: number } | undefined;
 
   public constructor(config: AppConfig, kmsClient?: KMSClient) {
     this.#config = config;
@@ -171,10 +172,29 @@ export class PaymentIntentSigner implements IntentSignerProvider {
     );
   }
 
-  public async readiness(): Promise<boolean> {
-    if (this.#readiness) return this.#readiness;
-    this.#readiness = this.#checkReadiness().catch(() => false);
-    return this.#readiness;
+  public readiness(): Promise<boolean> {
+    const now = Date.now();
+    if (this.#readiness && this.#readiness.expiresAt > now) {
+      return this.#readiness.promise;
+    }
+
+    const promise = this.#checkReadiness().then(
+      (ready) => {
+        if (this.#readiness?.promise !== promise) return ready;
+        if (ready) {
+          this.#readiness.expiresAt = Date.now() + readinessSuccessTtlMs;
+        } else {
+          this.#readiness = undefined;
+        }
+        return ready;
+      },
+      () => {
+        if (this.#readiness?.promise === promise) this.#readiness = undefined;
+        return false;
+      },
+    );
+    this.#readiness = { promise, expiresAt: Number.POSITIVE_INFINITY };
+    return promise;
   }
 
   async #checkReadiness(): Promise<boolean> {

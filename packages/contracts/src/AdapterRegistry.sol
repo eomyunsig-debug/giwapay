@@ -192,8 +192,8 @@ contract AdapterRegistry is IAdapterRegistry, Ownable2Step, Pausable {
     }
 
     /// @dev Scans executable opcodes while skipping PUSH immediate data. This
-    /// rejects delegatecall-based proxies and adapters that delegate execution
-    /// into mutable external implementations.
+    /// rejects delegatecall-based proxies. Normal CALL indirection remains an
+    /// adapter-registration review concern.
     function _containsDelegatecall(address adapter) private view returns (bool) {
         uint256 length = adapter.code.length;
         bytes memory runtime = new bytes(length);
