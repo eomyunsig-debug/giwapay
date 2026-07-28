@@ -1,4 +1,6 @@
-import { SignCommand, type KMSClient } from '@aws-sdk/client-kms';
+import { createPublicKey } from 'node:crypto';
+
+import { GetPublicKeyCommand, SignCommand, type KMSClient } from '@aws-sdk/client-kms';
 import type { Merchant } from '@giwapay/db';
 import { hashTypedData, parseSignature, recoverAddress, toBytes, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
@@ -73,6 +75,20 @@ function derSignature(signature: Hex): Uint8Array {
   const r = derInteger(BigInt(decoded.r));
   const s = derInteger(BigInt(decoded.s));
   return Uint8Array.from([0x30, r.length + s.length, ...r, ...s]);
+}
+
+function spkiPublicKey(publicKey: Hex): Uint8Array {
+  const bytes = toBytes(publicKey);
+  const key = createPublicKey({
+    key: {
+      kty: 'EC',
+      crv: 'secp256k1',
+      x: Buffer.from(bytes.slice(1, 33)).toString('base64url'),
+      y: Buffer.from(bytes.slice(33, 65)).toString('base64url'),
+    },
+    format: 'jwk',
+  });
+  return new Uint8Array(key.export({ format: 'der', type: 'spki' }));
 }
 
 describe('PaymentIntent signer providers', () => {
@@ -150,6 +166,41 @@ describe('PaymentIntent signer providers', () => {
     expect(
       (await recoverAddress({ hash: digest, signature: signed.signature })).toLowerCase(),
     ).toBe(account.address.toLowerCase());
+  });
+
+  it('retries readiness after a transient KMS failure and caches only success', async () => {
+    const privateKey = generatePrivateKey();
+    const account = privateKeyToAccount(privateKey);
+    const config = baseConfig({
+      AWS_REGION: 'ap-northeast-2',
+      PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
+        {
+          merchant: merchantAddress,
+          provider: 'aws-kms',
+          keyId: 'alias/giwapay-readiness-test',
+          address: account.address,
+        },
+      ]),
+    });
+    let calls = 0;
+    const fakeKms = {
+      send: async (command: GetPublicKeyCommand) => {
+        if (!(command instanceof GetPublicKeyCommand)) throw new Error('Unexpected KMS command');
+        calls += 1;
+        if (calls === 1) throw new Error('transient KMS network failure');
+        return {
+          KeySpec: 'ECC_SECG_P256K1',
+          KeyUsage: 'SIGN_VERIFY',
+          PublicKey: spkiPublicKey(account.publicKey),
+        };
+      },
+    } as unknown as KMSClient;
+    const signer = new PaymentIntentSigner(config, fakeKms);
+
+    await expect(signer.readiness()).resolves.toBe(false);
+    await expect(signer.readiness()).resolves.toBe(true);
+    await expect(signer.readiness()).resolves.toBe(true);
+    expect(calls).toBe(2);
   });
 
   it('rejects malformed or out-of-range KMS signatures', () => {
