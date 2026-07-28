@@ -16,7 +16,7 @@ import type { ReactNode } from 'react';
 
 import { Bilingual } from './bilingual';
 import { Brand } from './brand';
-import { LanguageToggle } from './language-toggle';
+import { LanguageToggle, useGiwaPayLocale } from './language-toggle';
 import { WalletButton } from './wallet-button';
 
 const nav = [
@@ -30,6 +30,7 @@ const nav = [
 
 export function DashboardShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const locale = useGiwaPayLocale();
   return (
     <div className="dashboard-layout">
       <aside className="dashboard-sidebar">
@@ -40,6 +41,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
               href={href}
               className="sidebar-link"
               data-active={href === '/dashboard' ? pathname === href : pathname.startsWith(href)}
+              aria-label={locale === 'ko' ? ko : en}
               key={href}
             >
               <Icon size={17} aria-hidden="true" />
