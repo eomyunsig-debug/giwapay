@@ -43,6 +43,11 @@ a {
   text-decoration: none;
 }
 
+[data-showcase-locale='en'] .copy-ko,
+[data-showcase-locale='ko'] .copy-en {
+  display: none;
+}
+
 svg {
   width: 1em;
   height: 1em;
@@ -100,6 +105,51 @@ footer {
   gap: 30px;
   color: var(--muted);
   font-size: 13px;
+}
+
+.topbar-actions,
+.language-toggle {
+  display: flex;
+  align-items: center;
+}
+
+.topbar-actions {
+  gap: 22px;
+}
+
+.language-toggle {
+  gap: 7px;
+  color: #68736d;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.language-toggle button {
+  padding: 5px 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  transition: color 160ms ease;
+}
+
+.language-toggle button:hover,
+.language-toggle button[aria-pressed='true'] {
+  color: var(--green);
+}
+
+.language-toggle button[aria-pressed='true'] {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.language-toggle button:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
 }
 
 .topbar nav a,
@@ -711,7 +761,7 @@ footer p:last-child {
   }
 
   .source-link {
-    font-size: 11px;
+    display: none;
   }
 
   .hero {

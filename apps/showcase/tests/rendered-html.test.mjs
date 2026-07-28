@@ -34,6 +34,9 @@ test('server-renders the public GiwaPay showcase', async () => {
   assert.match(html, /Pay with anything/);
   assert.match(html, /Settle/);
   assert.match(html, /Public showcase · Testnet MVP/);
+  assert.match(html, /ENGLISH/);
+  assert.match(html, /한국어/);
+  assert.match(html, /결제는 유연하게.*정산은 정확하게/s);
   assert.match(html, /Live GIWA Sepolia contracts and payment execution are not deployed yet/);
   assert.match(html, /https:\/\/github\.com\/eomyunsig-debug\/giwapay/);
   assert.match(html, /Not audited/);
