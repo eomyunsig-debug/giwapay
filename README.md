@@ -241,6 +241,25 @@ The configured platform fee is added to the exact merchant output and is paid
 by the customer in the settlement asset. It never reduces the merchant's
 signed settlement amount.
 
+## Production signer mappings
+
+Production defaults to PostgreSQL-backed per-merchant AWS KMS mappings through
+`PAYMENT_INTENT_SIGNER_SOURCE=database`. The database stores only a KMS key
+identifier and its derived public Ethereum address. After a merchant signs in
+once, an operator validates and provisions its non-exportable key with:
+
+```sh
+pnpm --filter @giwapay/api signer:provision -- \
+  --merchant 0x… \
+  --key-id alias/giwapay-merchant-example
+```
+
+The command derives the signer address from KMS and refuses accidental
+replacement or readiness-key reuse. The former JSON environment map remains
+available only through explicit `PAYMENT_INTENT_SIGNER_SOURCE=environment`
+compatibility. See [operations.md](docs/operations.md) for provisioning and
+rotation order.
+
 ## GIWA Sepolia deployment
 
 GIWA Sepolia is centralized in `@giwapay/chains`: chain ID `91342`, native ETH,

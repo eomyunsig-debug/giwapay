@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createDatabase,
   eq,
+  merchants,
   paymentIntents,
   refundRequests,
   webhookDeliveries,
@@ -503,6 +504,12 @@ run('Anvil payment, indexer, webhook, and refund integration', () => {
       cookie: cookieHeader(sessionResponse.headers['set-cookie']),
       'x-csrf-token': session.csrfToken,
     };
+    const [merchant] = await services.db
+      .select()
+      .from(merchants)
+      .where(eq(merchants.onchainMerchantAddress, merchantAccount.address.toLowerCase()))
+      .limit(1);
+    if (!merchant) throw new Error('Authenticated merchant was not persisted');
 
     const registerHash = await merchantWallet.writeContract({
       address: deployment.merchantRegistry,
@@ -510,7 +517,7 @@ run('Anvil payment, indexer, webhook, and refund integration', () => {
       functionName: 'registerMerchant',
       args: [
         merchantAccount.address,
-        services.intentSigner.addressForMerchant(merchantAccount.address) as Address,
+        (await services.intentSigner.addressForMerchant(merchant)) as Address,
       ],
     });
     expect(

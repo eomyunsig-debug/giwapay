@@ -9,6 +9,7 @@ import {
   createDatabase,
   eq,
   inArray,
+  merchantSignerKeys,
   merchants,
   paymentIntents,
   refundRequests,
@@ -26,6 +27,7 @@ import { buildApp } from './app.js';
 import { randomToken, secretDigest } from './crypto.js';
 import { loadConfig } from './env.js';
 import { ChainIndexer } from './indexer-service.js';
+import { DatabaseMerchantSignerKeyStore } from './signer-key-store.js';
 import { PaymentIntentSigner } from './signer.js';
 import type { AppServices } from './types.js';
 
@@ -152,6 +154,37 @@ run('SIWE integration', () => {
     const replay = await verify();
     expect(replay.statusCode).toBe(401);
     expect(replay.json().error.code).toBe('siwe_nonce_invalid');
+  });
+
+  it('loads a per-merchant KMS mapping from PostgreSQL', async () => {
+    const account = privateKeyToAccount(generatePrivateKey());
+    const [merchant] = await database.db
+      .insert(merchants)
+      .values({
+        onchainMerchantAddress: account.address.toLowerCase(),
+        adminAddress: account.address.toLowerCase(),
+        payoutAddress: account.address.toLowerCase(),
+        settings: { displayName: 'DB signer store merchant' },
+      })
+      .returning();
+    if (!merchant) throw new Error('Unable to create signer-store merchant');
+    try {
+      await database.db.insert(merchantSignerKeys).values({
+        merchantId: merchant.id,
+        provider: 'aws-kms',
+        keyId: `alias/giwapay-${merchant.id}`,
+        signerAddress: account.address.toLowerCase(),
+      });
+      const store = new DatabaseMerchantSignerKeyStore(database.db);
+      await expect(store.readiness()).resolves.toBe(true);
+      await expect(store.getByMerchantId(merchant.id)).resolves.toEqual({
+        provider: 'aws-kms',
+        keyId: `alias/giwapay-${merchant.id}`,
+        address: account.address.toLowerCase(),
+      });
+    } finally {
+      await database.db.delete(merchants).where(eq(merchants.id, merchant.id));
+    }
   });
 
   it('reloads the persisted cursor immediately after a reorg rollback', async () => {

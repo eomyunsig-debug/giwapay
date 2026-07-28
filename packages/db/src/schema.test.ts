@@ -6,6 +6,7 @@ import {
   apiKeys,
   authNonces,
   chainEvents,
+  merchantSignerKeys,
   merchants,
   paymentIntents,
   requestRateLimits,
@@ -26,6 +27,16 @@ describe('security-sensitive database constraints', () => {
     expect(
       getTableConfig(merchants).indexes.some(
         (index) => index.config.name === 'merchants_onchain_address_uq',
+      ),
+    ).toBe(true);
+    expect(
+      getTableConfig(merchantSignerKeys).indexes.some(
+        (index) => index.config.name === 'merchant_signer_keys_key_id_uq',
+      ),
+    ).toBe(true);
+    expect(
+      getTableConfig(merchantSignerKeys).indexes.some(
+        (index) => index.config.name === 'merchant_signer_keys_signer_address_uq',
       ),
     ).toBe(true);
     expect(
@@ -77,5 +88,11 @@ describe('security-sensitive database constraints', () => {
     );
     expect(rateLimitMigration).toContain('CREATE UNLOGGED TABLE "request_rate_limits"');
     expect(getTableConfig(requestRateLimits).primaryKeys).toHaveLength(1);
+    const signerKeysMigration = readFileSync(
+      new URL('../migrations/0003_merchant_signer_keys.sql', import.meta.url),
+      'utf8',
+    );
+    expect(signerKeysMigration).toContain('CREATE TABLE "merchant_signer_keys"');
+    expect(signerKeysMigration).toContain('"merchant_signer_keys_key_id_uq"');
   });
 });

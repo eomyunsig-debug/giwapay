@@ -114,6 +114,30 @@ export const merchants = pgTable(
   ],
 );
 
+export const merchantSignerKeys = pgTable(
+  'merchant_signer_keys',
+  {
+    merchantId: uuid('merchant_id')
+      .primaryKey()
+      .references(() => merchants.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 32 }).$type<'aws-kms'>().notNull(),
+    keyId: varchar('key_id', { length: 2_048 }).notNull(),
+    signerAddress: char('signer_address', { length: 42 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('merchant_signer_keys_key_id_uq').on(table.keyId),
+    uniqueIndex('merchant_signer_keys_signer_address_uq').on(table.signerAddress),
+    check('merchant_signer_keys_provider_aws_kms', sql`${table.provider} = 'aws-kms'`),
+    check('merchant_signer_keys_key_id_not_blank', sql`length(btrim(${table.keyId})) > 0`),
+    check(
+      'merchant_signer_keys_address_lowercase',
+      sql`${table.signerAddress} = lower(${table.signerAddress})`,
+    ),
+  ],
+);
+
 export const apiKeys = pgTable(
   'api_keys',
   {

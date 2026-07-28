@@ -7,6 +7,7 @@ import pino from 'pino';
 
 import { createChainClient } from './chain.js';
 import { loadConfig } from './env.js';
+import { DatabaseMerchantSignerKeyStore } from './signer-key-store.js';
 import { PaymentIntentSigner } from './signer.js';
 import type { AppServices } from './types.js';
 import { claimWebhookDeliveries, deliverWebhook } from './webhooks.js';
@@ -22,7 +23,11 @@ const services: AppServices = {
   db: database.db,
   pool: database.pool,
   chainClient: createChainClient(config),
-  intentSigner: new PaymentIntentSigner(config),
+  intentSigner: new PaymentIntentSigner(
+    config,
+    undefined,
+    new DatabaseMerchantSignerKeyStore(database.db),
+  ),
 };
 let stopping = false;
 

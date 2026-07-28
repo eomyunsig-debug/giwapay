@@ -78,10 +78,13 @@ unreleased GIWA products or production integrations.
   indexed digest lookup; the prefix is retained only for display. A newly
   created API key or webhook signing secret is shown once.
 - Production delegated PaymentIntent signing uses a distinct non-exportable
-  AWS KMS secp256k1 key handle per merchant. The API receives key identifiers
-  and expected addresses, not private keys. A shared extractable signer remains
-  available only for local/testnet demo operation and production rejects it.
-  Rotation/revocation remains an on-chain merchant-admin action.
+  AWS KMS secp256k1 key handle per merchant. PostgreSQL stores only the KMS key
+  identifier and derived public Ethereum address, never private key material.
+  Production defaults to this DB-backed mapping; the bounded environment JSON
+  source remains an explicit local/legacy compatibility mode. A shared
+  extractable signer remains available only for local/testnet demo operation
+  and production rejects it. Rotation/revocation remains an on-chain
+  merchant-admin action.
 - One PostgreSQL database is sufficient for jobs. Workers claim rows with
   locking and leases; Redis is intentionally not required. A separately
   supervised retention worker prunes expired auth/session state, terminal old
