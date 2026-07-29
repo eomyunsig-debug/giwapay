@@ -15,11 +15,14 @@ import { formatConfiguredAmount, formatDateTime, shortAddress } from '@/lib/form
 import { ensureGiwaWalletClient, sendWalletTransaction } from '@/lib/wallet';
 import { ErrorState, LoadingState } from './async-state';
 import { Bilingual } from './bilingual';
+import { useGiwaPayLocale } from './language-toggle';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 import { StatusBadge } from './status-badge';
 
 type RefundPhase = 'idle' | 'preparing' | 'approving' | 'refunding' | 'verifying';
 
 export function RefundsPanel() {
+  const ko = useGiwaPayLocale() === 'ko';
   const { address, chainId } = useAccount();
   const walletClientQuery = useWalletClient({
     chainId: GIWA_SEPOLIA_CHAIN_ID,
@@ -165,11 +168,11 @@ export function RefundsPanel() {
   };
 
   const phaseLabel: Record<RefundPhase, string> = {
-    idle: 'Fund & submit refund',
-    preparing: 'Preparing refund calldata…',
-    approving: 'Approve settlement token…',
-    refunding: 'Submit refund in wallet…',
-    verifying: 'Waiting for chain verification…',
+    idle: ko ? '자금 공급 후 환불' : 'Fund & submit refund',
+    preparing: ko ? '환불 준비 중…' : 'Preparing refund calldata…',
+    approving: ko ? '정산 토큰 승인…' : 'Approve settlement token…',
+    refunding: ko ? '지갑에서 환불 제출…' : 'Submit refund in wallet…',
+    verifying: ko ? '체인 검증 대기 중…' : 'Waiting for chain verification…',
   };
 
   return (
@@ -179,17 +182,33 @@ export function RefundsPanel() {
           <h1>
             <Bilingual ko="환불" en="Refunds" />
           </h1>
-          <p>Full or partial refunds are funded directly by the merchant wallet.</p>
+          <p>
+            {ko
+              ? '판매자 지갑에서 전액 또는 일부를 환불하세요.'
+              : 'Send a full or partial refund from your merchant wallet.'}
+          </p>
         </div>
       </div>
 
-      <div className="info-banner" style={{ marginBottom: 20 }}>
-        <ShieldCheck size={17} />
-        <span>
-          Only chain-verified payments can be refunded. GiwaPay does not hold a refund balance; the
-          merchant approves the settlement token and sends the onchain refund.
-        </span>
-      </div>
+      <ProgressiveDisclosure
+        className="refund-safety-disclosure"
+        summary={<Bilingual ko="환불 자금 및 검증 방식" en="How refunds are funded and verified" />}
+        description={
+          <Bilingual
+            ko="GiwaPay는 환불 잔액을 보관하지 않습니다."
+            en="GiwaPay never holds a refund balance."
+          />
+        }
+      >
+        <div className="info-banner">
+          <ShieldCheck size={17} />
+          <span>
+            {ko
+              ? '체인에서 검증된 결제만 환불할 수 있습니다. 판매자가 정산 토큰을 승인하고 연결된 지갑에서 온체인 환불을 보냅니다.'
+              : 'Only chain-verified payments can be refunded. The merchant approves the settlement token and sends the refund onchain from its connected wallet.'}
+          </span>
+        </div>
+      </ProgressiveDisclosure>
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
@@ -199,7 +218,11 @@ export function RefundsPanel() {
         </div>
         <form className="panel-body" onSubmit={submit}>
           <div className="form-grid">
-            <Field label="Verified payment" htmlFor="refund-payment" className="full">
+            <Field
+              label={ko ? '검증된 결제' : 'Verified payment'}
+              htmlFor="refund-payment"
+              className="full"
+            >
               <Select
                 id="refund-payment"
                 value={intentId}
@@ -213,7 +236,7 @@ export function RefundsPanel() {
                 }}
                 required
               >
-                <option value="">Select a payment</option>
+                <option value="">{ko ? '결제 선택' : 'Select a payment'}</option>
                 {refundable.map((intent) => {
                   const metadata = getConfiguredToken(intent.settlement.token);
                   return (
@@ -230,17 +253,19 @@ export function RefundsPanel() {
               </Select>
             </Field>
             <Field
-              label="Refund amount"
+              label={ko ? '환불 금액' : 'Refund amount'}
               htmlFor="refund-amount"
               hint={
                 selected
-                  ? `Remaining: ${formatConfiguredAmount(
+                  ? `${ko ? '남은 금액' : 'Remaining'}: ${formatConfiguredAmount(
                       (
                         BigInt(selected.settlement.amount) - BigInt(selected.refundedAmount)
                       ).toString(),
                       token,
                     )} ${token?.symbol ?? ''}`
-                  : 'Choose a verified payment first.'
+                  : ko
+                    ? '먼저 검증된 결제를 선택하세요.'
+                    : 'Choose a verified payment first.'
               }
             >
               <Input
@@ -255,7 +280,7 @@ export function RefundsPanel() {
                 required
               />
             </Field>
-            <Field label="Reason (optional)" htmlFor="refund-reason">
+            <Field label={ko ? '사유 (선택)' : 'Reason (optional)'} htmlFor="refund-reason">
               <Input
                 id="refund-reason"
                 value={reason}
@@ -264,7 +289,7 @@ export function RefundsPanel() {
                   setRefundIdempotencyKey(undefined);
                 }}
                 maxLength={500}
-                placeholder="Customer request"
+                placeholder={ko ? '고객 요청' : 'Customer request'}
               />
             </Field>
           </div>
@@ -283,7 +308,7 @@ export function RefundsPanel() {
                       loading={phase !== 'idle'}
                       onClick={() => void resumeRequestedRefund()}
                     >
-                      Resume the same refund
+                      {ko ? '같은 환불 이어서 처리' : 'Resume the same refund'}
                     </Button>
                   </span>
                 ) : null}
@@ -326,7 +351,9 @@ export function RefundsPanel() {
             >
               <RotateCcw size={15} />{' '}
               {phase === 'idle' && chainId !== GIWA_SEPOLIA_CHAIN_ID
-                ? 'Switch to GIWA & refund'
+                ? ko
+                  ? 'GIWA로 전환 후 환불'
+                  : 'Switch to GIWA & refund'
                 : phaseLabel[phase]}
             </Button>
           </div>
@@ -346,14 +373,13 @@ export function RefundsPanel() {
             <ErrorState error={intents.error} />
           </div>
         ) : refundable.length ? (
-          <table className="data-table">
+          <table className="data-table refund-table">
             <thead>
               <tr>
-                <th>Payment</th>
-                <th>Verified settlement</th>
-                <th>Refunded</th>
-                <th>Status</th>
-                <th>Created</th>
+                <th>{ko ? '결제' : 'Payment'}</th>
+                <th>{ko ? '검증된 정산' : 'Verified settlement'}</th>
+                <th>{ko ? '환불됨' : 'Refunded'}</th>
+                <th>{ko ? '상태' : 'Status'}</th>
               </tr>
             </thead>
             <tbody>
@@ -363,7 +389,22 @@ export function RefundsPanel() {
                   <tr key={intent.id}>
                     <td>
                       <span className="table-primary">{intent.description}</span>
-                      <span className="table-secondary">{intent.id}</span>
+                      <ProgressiveDisclosure
+                        className="refund-row-disclosure"
+                        summary={ko ? '결제 상세' : 'Payment details'}
+                        description={ko ? 'ID와 생성 시각' : 'ID and creation time'}
+                      >
+                        <dl>
+                          <div className="gp-definition-row">
+                            <dt>{ko ? '결제 ID' : 'Payment ID'}</dt>
+                            <dd className="mono">{intent.id}</dd>
+                          </div>
+                          <div className="gp-definition-row">
+                            <dt>{ko ? '생성' : 'Created'}</dt>
+                            <dd>{formatDateTime(intent.createdAt)}</dd>
+                          </div>
+                        </dl>
+                      </ProgressiveDisclosure>
                     </td>
                     <td>
                       {formatConfiguredAmount(intent.settlement.amount, metadata)}{' '}
@@ -376,7 +417,6 @@ export function RefundsPanel() {
                     <td>
                       <StatusBadge status={intent.status} />
                     </td>
-                    <td>{formatDateTime(intent.createdAt)}</td>
                   </tr>
                 );
               })}
@@ -387,8 +427,12 @@ export function RefundsPanel() {
             <span className="empty-icon">
               <Check size={19} />
             </span>
-            <h3>No refundable payments</h3>
-            <p>Verified successful payments will appear here.</p>
+            <h3>{ko ? '환불 가능한 결제가 없습니다' : 'No refundable payments'}</h3>
+            <p>
+              {ko
+                ? '검증 완료된 결제가 여기에 표시됩니다.'
+                : 'Verified successful payments will appear here.'}
+            </p>
           </div>
         )}
       </Card>

@@ -59,8 +59,8 @@ export function DashboardOverview() {
           </h1>
           <Bilingual
             as="div"
-            ko="아래 최신 50개 기록은 체인 인덱싱 데이터베이스에서 가져옵니다."
-            en="The latest 50 records below come from the chain-indexed database."
+            ko="온체인 검증이 끝난 결제 상태만 표시합니다."
+            en="Only chain-verified payment state is shown here."
           />
         </div>
         <Link className="action-link action-link--primary" href="/dashboard/payment-links">
@@ -70,19 +70,22 @@ export function DashboardOverview() {
 
       <div className="metric-grid">
         <Card className="metric-card">
-          <span className="metric-label">Verified · latest 50</span>
+          <span className="metric-label">
+            <Bilingual ko="검증 완료" en="Verified" />
+          </span>
           <strong className="metric-value">{paid.length}</strong>
-          <span className="metric-caption">Indexer-confirmed success events</span>
         </Card>
         <Card className="metric-card">
-          <span className="metric-label">Awaiting · latest 50</span>
+          <span className="metric-label">
+            <Bilingual ko="진행 중" en="In progress" />
+          </span>
           <strong className="metric-value">{awaiting.length}</strong>
-          <span className="metric-caption">Created, submitted, or confirming</span>
         </Card>
         <Card className="metric-card">
-          <span className="metric-label">Refunded · latest 50</span>
+          <span className="metric-label">
+            <Bilingual ko="환불 포함" en="With refunds" />
+          </span>
           <strong className="metric-value">{refundCount}</strong>
-          <span className="metric-caption">Merchant-funded onchain refunds</span>
         </Card>
       </div>
 
@@ -91,7 +94,6 @@ export function DashboardOverview() {
           <h2>
             <Bilingual ko="최근 결제 요청" en="Recent payment intents" />
           </h2>
-          <span className="metric-caption">Auto-refreshes from API</span>
         </div>
         {items.length === 0 ? (
           <div className="empty-state">
@@ -105,7 +107,7 @@ export function DashboardOverview() {
             </Link>
           </div>
         ) : (
-          <table className="data-table">
+          <table className="data-table compact-table">
             <thead>
               <tr>
                 <th>Description</th>
@@ -120,7 +122,6 @@ export function DashboardOverview() {
                 <tr key={intent.id}>
                   <td>
                     <span className="table-primary">{intent.description}</span>
-                    <span className="table-secondary">{intent.id}</span>
                   </td>
                   <td>
                     {formatConfiguredAmount(

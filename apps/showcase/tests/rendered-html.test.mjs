@@ -33,13 +33,30 @@ test('server-renders the public GiwaPay showcase', async () => {
   assert.match(html, /<title>GiwaPay — Public Testnet MVP Showcase<\/title>/i);
   assert.match(html, /Pay with anything/);
   assert.match(html, /Settle/);
-  assert.match(html, /Public showcase · Testnet MVP/);
+  assert.match(html, /GIWA Sepolia · Testnet MVP/);
   assert.match(html, /ENGLISH/);
   assert.match(html, /한국어/);
-  assert.match(html, /결제는 유연하게.*정산은 정확하게/s);
+  assert.match(html, /결제는 자유롭게.*정산은.*정확하게/s);
+  assert.match(html, /Three steps\. That is it\./);
+  assert.match(html, /Explore the repository/);
+  assert.match(html, /Testnet checkout preview/);
   assert.match(html, /Live GIWA Sepolia contracts and payment execution are not deployed yet/);
   assert.match(html, /https:\/\/github\.com\/eomyunsig-debug\/giwapay/);
   assert.match(html, /Not audited/);
+  assert.match(html, /property="og:image"[^>]+\/og\.png/);
+  assert.match(html, /name="twitter:card" content="summary_large_image"/);
+});
+
+test('keeps operating and security detail in a closed native disclosure', async () => {
+  const response = await render();
+  const html = await response.text();
+
+  assert.match(html, /<details class="operations-disclosure">/);
+  assert.match(html, /<summary>.*How it works and security boundaries.*<\/summary>/s);
+  assert.doesNotMatch(html, /<details[^>]*\sopen(?:\s|>)/);
+  assert.match(html, /Merchant signed/);
+  assert.match(html, /Independent verification/);
+  assert.match(html, /SECURITY BOUNDARIES/);
 });
 
 test('does not present a fake checkout success or wallet action', async () => {

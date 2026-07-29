@@ -13,6 +13,8 @@ import { MERCHANT_REGISTRY_ADDRESS } from '@/lib/config';
 import { formatBasisPoints, shortAddress } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
 import { Bilingual } from './bilingual';
+import { useGiwaPayLocale } from './language-toggle';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 
 interface RecipientDraft {
   address: string;
@@ -29,6 +31,7 @@ interface OnchainSplit {
 const initialRecipients = (): RecipientDraft[] => [{ address: '', basisPoints: '10000' }];
 
 export function SplitsPanel() {
+  const ko = useGiwaPayLocale() === 'ko';
   const { address, chainId } = useAccount();
   const publicClient = usePublicClient({ chainId: GIWA_SEPOLIA_CHAIN_ID });
   const { switchChainAsync } = useSwitchChain();
@@ -222,32 +225,46 @@ export function SplitsPanel() {
             <Bilingual ko="정산 분배" en="Settlement splits" />
           </h1>
           <p>
-            Register immutable recipient templates before referencing their splitId in a
-            PaymentIntent.
+            {ko
+              ? '각 정산의 수령인과 비율을 미리 정하세요.'
+              : 'Choose who receives each settlement and in what proportion.'}
           </p>
         </div>
       </div>
 
-      <div className="info-banner" style={{ marginBottom: 20 }}>
-        <Split size={17} />
-        <span>
-          The invoice signer can only reference a registered splitId. It cannot supply arbitrary
-          recipients, so signer compromise cannot redirect settlement.
-        </span>
-      </div>
+      <ProgressiveDisclosure
+        className="split-security-disclosure"
+        summary={<Bilingual ko="분배 템플릿 보안" en="How split templates stay safe" />}
+        description={
+          <Bilingual
+            ko="수령인은 청구서 발행 전에 온체인에 고정됩니다."
+            en="Recipients are fixed onchain before an invoice is issued."
+          />
+        }
+      >
+        <p className="gp-field-hint">
+          {ko
+            ? '청구서 서명자는 등록된 분배 ID만 참조할 수 있습니다. 임의의 수령인을 넣을 수 없으므로 서명 키가 노출돼도 정산 자금을 다른 곳으로 돌릴 수 없습니다.'
+            : 'The invoice signer can only reference a registered split ID. It cannot provide arbitrary recipients, so a compromised invoice signer cannot redirect settlement funds.'}
+        </p>
+      </ProgressiveDisclosure>
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
           <h2>
-            <Bilingual ko="불변 분배 템플릿 만들기" en="Create immutable split template" />
+            <Bilingual ko="분배 템플릿 만들기" en="Create split template" />
           </h2>
-          <span className="metric-caption">1–8 recipients · exactly 10,000 bps</span>
+          <span className="metric-caption">1–8 recipients · total 100%</span>
         </div>
         <form className="panel-body" onSubmit={create}>
           <Field
-            label="Stable split label"
+            label={ko ? '분배 이름' : 'Split label'}
             htmlFor="split-label"
-            hint="The splitId is deterministically derived from this label and merchant admin address. A created template cannot be overwritten."
+            hint={
+              ko
+                ? '팀이 알아볼 수 있는 고정된 이름을 사용하세요.'
+                : 'Use a stable name your team will recognize.'
+            }
           >
             <Input
               id="split-label"
@@ -259,9 +276,23 @@ export function SplitsPanel() {
             />
           </Field>
           {splitId ? (
-            <code className="secret-value" style={{ marginBlock: 12 }}>
-              {splitId}
-            </code>
+            <ProgressiveDisclosure
+              className="split-id-disclosure"
+              summary={<Bilingual ko="생성될 분배 ID" en="Generated split ID" />}
+              description={
+                <Bilingual
+                  ko="고급 연동에서 사용하는 변경 불가 식별자"
+                  en="Immutable identifier for advanced integrations"
+                />
+              }
+            >
+              <code className="secret-value">{splitId}</code>
+              <p className="gp-field-hint">
+                {ko
+                  ? '이름과 판매자 관리자 주소에서 계산됩니다. 만든 뒤에는 덮어쓸 수 없습니다.'
+                  : 'Derived from the label and merchant admin address. Once created, this template cannot be overwritten.'}
+              </p>
+            </ProgressiveDisclosure>
           ) : null}
 
           <div className="step-list">
@@ -313,7 +344,7 @@ export function SplitsPanel() {
               }
               disabled={recipients.length >= 8}
             >
-              <UserRoundPlus size={14} /> Add recipient
+              <UserRoundPlus size={14} /> {ko ? '수령인 추가' : 'Add recipient'}
             </Button>
             <Button
               type="submit"
@@ -321,7 +352,7 @@ export function SplitsPanel() {
               loading={submitting}
               disabled={!MERCHANT_REGISTRY_ADDRESS || !address}
             >
-              <Plus size={15} /> Create onchain
+              <Plus size={15} /> {ko ? '온체인에 만들기' : 'Create onchain'}
             </Button>
           </div>
           {error ? (
@@ -337,7 +368,6 @@ export function SplitsPanel() {
           <h2>
             <Bilingual ko="온체인 템플릿" en="Onchain templates" />
           </h2>
-          <span className="metric-caption">Read directly from MerchantRegistry</span>
         </div>
         {splits.isLoading ? (
           <LoadingState label="Reading split templates onchain…" />
@@ -346,13 +376,13 @@ export function SplitsPanel() {
             <ErrorState error={splits.error} />
           </div>
         ) : splits.data?.length ? (
-          <table className="data-table">
+          <table className="data-table split-table">
             <thead>
               <tr>
-                <th>splitId</th>
-                <th>Recipients</th>
-                <th>Total</th>
-                <th>Status</th>
+                <th>{ko ? '분배' : 'Split'}</th>
+                <th>{ko ? '수령인' : 'Recipients'}</th>
+                <th>{ko ? '합계' : 'Total'}</th>
+                <th>{ko ? '상태' : 'Status'}</th>
                 <th aria-label="Actions" />
               </tr>
             </thead>
@@ -360,10 +390,37 @@ export function SplitsPanel() {
               {splits.data.map((split) => (
                 <tr key={split.splitId}>
                   <td>
-                    <span className="mono">{shortAddress(split.splitId)}</span>
-                    <span className="table-secondary">
-                      {split.splitId === zeroHash ? 'Default payout' : 'Custom immutable'}
+                    <span className="table-primary">
+                      {split.splitId === zeroHash
+                        ? ko
+                          ? '기본 지급'
+                          : 'Default payout'
+                        : ko
+                          ? '사용자 분배'
+                          : 'Custom immutable'}
                     </span>
+                    <ProgressiveDisclosure
+                      className="split-row-disclosure"
+                      summary={ko ? '분배 상세' : 'Split details'}
+                      description={ko ? 'ID와 레지스트리 출처' : 'ID and registry source'}
+                    >
+                      <code className="secret-value">{split.splitId}</code>
+                      <p className="gp-field-hint">
+                        {ko
+                          ? '온체인 MerchantRegistry에서 직접 읽었습니다.'
+                          : 'Read directly from the onchain MerchantRegistry.'}
+                      </p>
+                      <Button variant="secondary" size="sm" onClick={() => copy(split.splitId)}>
+                        {copied === split.splitId ? <Check size={13} /> : <Copy size={13} />}
+                        {copied === split.splitId
+                          ? ko
+                            ? '복사됨'
+                            : 'Copied'
+                          : ko
+                            ? '분배 ID 복사'
+                            : 'Copy split ID'}
+                      </Button>
+                    </ProgressiveDisclosure>
                   </td>
                   <td>
                     {split.recipients.map((recipient, index) => (
@@ -378,19 +435,11 @@ export function SplitsPanel() {
                   </td>
                   <td>
                     <span className={`gp-badge gp-badge--${split.enabled ? 'success' : 'neutral'}`}>
-                      {split.enabled ? 'Enabled' : 'Disabled'}
+                      {split.enabled ? (ko ? '사용 중' : 'Enabled') : ko ? '비활성' : 'Disabled'}
                     </span>
                   </td>
                   <td>
                     <div className="inline-actions">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copy(split.splitId)}
-                        aria-label="Copy split ID"
-                      >
-                        {copied === split.splitId ? <Check size={13} /> : <Copy size={13} />}
-                      </Button>
                       {split.splitId !== zeroHash && split.enabled ? (
                         <Button
                           variant="ghost"
@@ -413,7 +462,7 @@ export function SplitsPanel() {
             <span className="empty-icon">
               <Split size={19} />
             </span>
-            <h3>No onchain splits found</h3>
+            <h3>{ko ? '온체인 분배가 없습니다' : 'No onchain splits found'}</h3>
           </div>
         )}
       </Card>

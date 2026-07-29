@@ -32,6 +32,7 @@ import { ensureGiwaWalletClient, sendWalletTransaction } from '@/lib/wallet';
 import { Brand } from './brand';
 import { ErrorState, LoadingState } from './async-state';
 import { LanguageToggle, useGiwaPayLocale } from './language-toggle';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 import { StatusBadge } from './status-badge';
 import { TestnetFaucetButton } from './testnet-faucet-button';
 import { WalletButton } from './wallet-button';
@@ -414,80 +415,100 @@ export function CheckoutClient({ id }: { id: string }) {
                 : '—'}
             </strong>
           </div>
-          <dl>
-            <DefinitionRow term={ko ? '선택한 입력 토큰' : 'Selected input token'}>
-              {selectedMetadata && selectedToken ? (
-                <span>
-                  {selectedMetadata.symbol}
-                  <br />
-                  <span className="mono">{selectedToken}</span>
-                </span>
-              ) : (
-                '—'
-              )}
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '정산 토큰' : 'Settlement token'}>
-              <span>
-                {settlementToken?.symbol ?? 'Token'}
-                <br />
-                <span className="mono">{intent.settlement.token}</span>
-              </span>
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '최대 입력액' : 'Maximum input'}>
-              {quoteValue && selectedMetadata
-                ? `${formatMaximumRawAmount(
-                    quoteValue.maximumInputAmount,
-                    selectedMetadata.decimals,
-                  )} ${selectedMetadata.symbol}`
-                : '—'}
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '슬리피지' : 'Slippage'}>
-              {quoteValue ? formatBasisPoints(quoteValue.slippageBps) : '—'}
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '플랫폼 수수료' : 'Platform fee'}>
-              {settlementToken
-                ? formatRawAmount(intent.platformFee, settlementToken.decimals)
-                : ko
-                  ? '토큰 정보 없음'
-                  : 'Metadata unavailable'}{' '}
-              {settlementToken?.symbol ?? shortAddress(intent.settlement.token)}
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '어댑터' : 'Adapter'}>
-              {quoteValue ? (
-                <>
-                  {quoteValue.adapterIdentifier}
-                  <br />
-                  <span className="mono">
-                    {quoteValue.adapter === zeroAddress
-                      ? ko
-                        ? '직접 토큰 결제'
-                        : 'Direct token'
-                      : quoteValue.adapter}
-                  </span>
-                </>
-              ) : (
-                '—'
-              )}
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '정산 수령인' : 'Settlement recipient'}>
-              {(quoteValue?.settlementRecipients ?? intent.settlementRecipients).map((split) => (
-                <span key={split.address} style={{ display: 'block' }}>
-                  <span className="mono">{split.address}</span>
-                  <br />
-                  {formatBasisPoints(split.basisPoints)}
-                </span>
-              ))}
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '결제 라우터' : 'Payment router'}>
-              <span className="mono">{quoteValue?.router ?? intent.routerAddress}</span>
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '승인 대상' : 'Approval spender'}>
-              <span className="mono">{quoteValue?.approvalSpender ?? '—'}</span>
-            </DefinitionRow>
-            <DefinitionRow term={ko ? '만료 시각' : 'Expires'}>
-              {formatDateTime(intent.expiresAt, ko ? 'ko-KR' : 'en-US')}
-            </DefinitionRow>
+          <dl className="checkout-key-terms">
+            <div>
+              <dt>{ko ? '최대 입력액' : 'Maximum input'}</dt>
+              <dd>
+                {quoteValue && selectedMetadata
+                  ? `${formatMaximumRawAmount(
+                      quoteValue.maximumInputAmount,
+                      selectedMetadata.decimals,
+                    )} ${selectedMetadata.symbol}`
+                  : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt>{ko ? '슬리피지' : 'Slippage'}</dt>
+              <dd>{quoteValue ? formatBasisPoints(quoteValue.slippageBps) : '—'}</dd>
+            </div>
+            <div>
+              <dt>{ko ? '플랫폼 수수료' : 'Platform fee'}</dt>
+              <dd>
+                {settlementToken
+                  ? formatRawAmount(intent.platformFee, settlementToken.decimals)
+                  : ko
+                    ? '토큰 정보 없음'
+                    : 'Metadata unavailable'}{' '}
+                {settlementToken?.symbol ?? shortAddress(intent.settlement.token)}
+              </dd>
+            </div>
+            <div>
+              <dt>{ko ? '만료' : 'Expires'}</dt>
+              <dd>{formatDateTime(intent.expiresAt, ko ? 'ko-KR' : 'en-US')}</dd>
+            </div>
           </dl>
+
+          <ProgressiveDisclosure
+            summary={ko ? '결제 경로 및 검증 정보' : 'Payment route and verification details'}
+            description={
+              ko
+                ? '토큰 주소, 어댑터, 정산 수령인과 승인 대상'
+                : 'Token addresses, adapter, recipients, and approval target'
+            }
+          >
+            <dl className="checkout-technical-terms">
+              <DefinitionRow term={ko ? '선택한 입력 토큰' : 'Selected input token'}>
+                {selectedMetadata && selectedToken ? (
+                  <span>
+                    {selectedMetadata.symbol}
+                    <br />
+                    <span className="mono">{selectedToken}</span>
+                  </span>
+                ) : (
+                  '—'
+                )}
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '정산 토큰' : 'Settlement token'}>
+                <span>
+                  {settlementToken?.symbol ?? 'Token'}
+                  <br />
+                  <span className="mono">{intent.settlement.token}</span>
+                </span>
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '어댑터' : 'Adapter'}>
+                {quoteValue ? (
+                  <>
+                    {quoteValue.adapterIdentifier}
+                    <br />
+                    <span className="mono">
+                      {quoteValue.adapter === zeroAddress
+                        ? ko
+                          ? '직접 토큰 결제'
+                          : 'Direct token'
+                        : quoteValue.adapter}
+                    </span>
+                  </>
+                ) : (
+                  '—'
+                )}
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '정산 수령인' : 'Settlement recipient'}>
+                {(quoteValue?.settlementRecipients ?? intent.settlementRecipients).map((split) => (
+                  <span key={split.address} style={{ display: 'block' }}>
+                    <span className="mono">{split.address}</span>
+                    <br />
+                    {formatBasisPoints(split.basisPoints)}
+                  </span>
+                ))}
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '결제 라우터' : 'Payment router'}>
+                <span className="mono">{quoteValue?.router ?? intent.routerAddress}</span>
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '승인 대상' : 'Approval spender'}>
+                <span className="mono">{quoteValue?.approvalSpender ?? '—'}</span>
+              </DefinitionRow>
+            </dl>
+          </ProgressiveDisclosure>
 
           {submittedHash && !verifiedPaid ? (
             <div className="info-banner" role="status">
@@ -551,8 +572,8 @@ export function CheckoutClient({ id }: { id: string }) {
           <p className="checkout-disclaimer">
             <Wallet size={10} />{' '}
             {ko
-              ? 'GiwaPay는 거래 사이에 자금을 보관하지 않습니다. 지갑에서 거래를 제출해도 체인 이벤트가 독립적으로 검증되기 전에는 결제 성공이 아닙니다.'
-              : 'GiwaPay never takes custody between transactions. A wallet submission is not a successful payment until the chain event is independently verified.'}
+              ? 'GiwaPay는 자금을 보관하지 않으며, 결제는 온체인 검증 후 확정됩니다.'
+              : 'GiwaPay never holds funds. Payment completes after onchain verification.'}
           </p>
         </Card>
       </div>

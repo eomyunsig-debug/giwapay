@@ -14,6 +14,7 @@ import { MERCHANT_REGISTRY_ADDRESS, transactionExplorerUrl } from '@/lib/config'
 import { shortAddress } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
 import { Bilingual } from './bilingual';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 
 export function OnboardingPanel() {
   const { address, isConnected, chainId } = useAccount();
@@ -394,84 +395,104 @@ export function OnboardingPanel() {
               </small>
             </span>
           </div>
-          <div className="info-banner">
-            <ShieldCheck size={17} />
-            <span>
-              The delegated signer cannot edit payout addresses, split templates, platform fees,
-              adapters, or merchant funds.
-            </span>
-          </div>
+          <ProgressiveDisclosure
+            summary={<Bilingual ko="권한 구조 보기" en="View permission boundaries" />}
+            description={
+              <Bilingual
+                ko="관리자, 지급 주소와 청구서 서명자의 역할"
+                en="Admin, payout, and invoice signer roles"
+              />
+            }
+          >
+            <div className="info-banner">
+              <ShieldCheck size={17} />
+              <span>
+                <Bilingual
+                  ko="위임 서명자는 청구서만 서명합니다. 지급 주소, 정산 분배, 플랫폼 수수료, 어댑터와 판매자 자금을 변경할 수 없습니다."
+                  en="The delegated signer can sign invoices only. It cannot edit payout addresses, split templates, platform fees, adapters, or merchant funds."
+                />
+              </span>
+            </div>
+          </ProgressiveDisclosure>
         </div>
       </div>
 
       {registered ? (
-        <Card className="panel" style={{ marginTop: 20 }}>
-          <div className="panel-header">
-            <h2>
-              <Bilingual ko="판매자 관리자 이전" en="Rotate merchant admin" />
-            </h2>
-          </div>
-          <form className="panel-body" onSubmit={proposeAdminTransfer}>
-            <p className="metric-caption">
-              The merchant identity remains <span className="mono">{merchantIdentity}</span>.
-              Existing PaymentIntents, splits, and refund records do not move.
-            </p>
-            <Field
-              label="Replacement admin"
-              htmlFor="replacement-admin"
-              hint="The replacement wallet must explicitly accept onchain. This does not recover an already lost key."
-            >
-              <Input
-                id="replacement-admin"
-                className="mono"
-                value={pendingAdminAddress ?? newAdmin}
-                onChange={(event) => setNewAdmin(event.target.value)}
-                readOnly={Boolean(pendingAdminAddress)}
-                placeholder="0x…"
-                spellCheck={false}
-                required
-              />
-            </Field>
-            {pendingAdminAddress ? (
-              <div className="info-banner" role="status">
-                <Info size={16} />
-                <span>
-                  Pending acceptance by <span className="mono">{pendingAdminAddress}</span>.
-                  {adminTransferUrl ? (
-                    <>
-                      {' '}
-                      Share only this acceptance link:{' '}
-                      <a className="explorer-link" href={adminTransferUrl}>
-                        Open transfer <ExternalLink size={11} />
-                      </a>
-                    </>
-                  ) : null}
-                </span>
-              </div>
-            ) : null}
-            {adminTransferHash ? (
-              <p className="metric-caption">
-                Last admin-transfer transaction: {shortAddress(adminTransferHash)}
-              </p>
-            ) : null}
-            <div className="form-actions">
-              {pendingAdminAddress ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  loading={submitting}
-                  onClick={() => void cancelAdminTransfer()}
-                >
-                  Cancel pending transfer
-                </Button>
-              ) : (
-                <Button type="submit" loading={submitting} disabled={!isAddress(newAdmin)}>
-                  Propose two-step transfer
-                </Button>
-              )}
+        <ProgressiveDisclosure
+          className="account-management-disclosure"
+          summary={<Bilingual ko="고급 계정 관리" en="Advanced account management" />}
+          description={
+            <Bilingual ko="판매자 관리자 2단계 이전" en="Two-step merchant admin transfer" />
+          }
+        >
+          <Card className="panel">
+            <div className="panel-header">
+              <h2>
+                <Bilingual ko="판매자 관리자 이전" en="Rotate merchant admin" />
+              </h2>
             </div>
-          </form>
-        </Card>
+            <form className="panel-body" onSubmit={proposeAdminTransfer}>
+              <p className="metric-caption">
+                The merchant identity remains <span className="mono">{merchantIdentity}</span>.
+                Existing PaymentIntents, splits, and refund records do not move.
+              </p>
+              <Field
+                label="Replacement admin"
+                htmlFor="replacement-admin"
+                hint="The replacement wallet must explicitly accept onchain. This does not recover an already lost key."
+              >
+                <Input
+                  id="replacement-admin"
+                  className="mono"
+                  value={pendingAdminAddress ?? newAdmin}
+                  onChange={(event) => setNewAdmin(event.target.value)}
+                  readOnly={Boolean(pendingAdminAddress)}
+                  placeholder="0x…"
+                  spellCheck={false}
+                  required
+                />
+              </Field>
+              {pendingAdminAddress ? (
+                <div className="info-banner" role="status">
+                  <Info size={16} />
+                  <span>
+                    Pending acceptance by <span className="mono">{pendingAdminAddress}</span>.
+                    {adminTransferUrl ? (
+                      <>
+                        {' '}
+                        Share only this acceptance link:{' '}
+                        <a className="explorer-link" href={adminTransferUrl}>
+                          Open transfer <ExternalLink size={11} />
+                        </a>
+                      </>
+                    ) : null}
+                  </span>
+                </div>
+              ) : null}
+              {adminTransferHash ? (
+                <p className="metric-caption">
+                  Last admin-transfer transaction: {shortAddress(adminTransferHash)}
+                </p>
+              ) : null}
+              <div className="form-actions">
+                {pendingAdminAddress ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={submitting}
+                    onClick={() => void cancelAdminTransfer()}
+                  >
+                    Cancel pending transfer
+                  </Button>
+                ) : (
+                  <Button type="submit" loading={submitting} disabled={!isAddress(newAdmin)}>
+                    Propose two-step transfer
+                  </Button>
+                )}
+              </div>
+            </form>
+          </Card>
+        </ProgressiveDisclosure>
       ) : null}
     </>
   );
