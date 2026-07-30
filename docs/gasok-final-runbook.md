@@ -1,7 +1,7 @@
 # GiwaPay GASOK final submission runbook
 
 Official cutoff shown in the
-[Upbit program notice](https://upbit.com/service_center/notice?id=6386):
+[Upbit program notice](https://upbit.com/service_center/notice?id=1629960096):
 **2026-07-31 23:59:59**.
 The official notice does not state a time zone, and this review could not
 independently verify the live form's time-zone display. Use
@@ -12,7 +12,7 @@ independently verify the live form's time-zone display. Use
 Submit GiwaPay only when all four hard gates are green:
 
 1. a truthful executable-flow MVP or recorded demo opens without
-   authentication if the live form requests that evidence;
+   authentication;
 2. at least one GiwaPay contract is deployed to GIWA Sepolia and verified in
    GIWA Explorer;
 3. the pitch deck, team introduction, and technical one-pager are publicly
@@ -53,7 +53,7 @@ repository homepage, or unverified explorer page.
 ## July 31 before 18:00 KST — submit
 
 - [ ] Open every submitted URL in a signed-out browser.
-- [ ] Re-check the provisional form map in
+- [ ] Re-check the confirmed form map in
       [`gasok-application.md`](gasok-application.md) against the live form, then
       copy only the answers that match; do not improvise new traction or
       integrations.

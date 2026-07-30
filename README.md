@@ -48,7 +48,7 @@ Public review links:
   [docs/gasok-one-pager.md](docs/gasok-one-pager.md)
 - GASOK pitch deck:
   [docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf](docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf)
-- five-minute judge evidence path:
+- three-minute judge evidence path:
   [docs/gasok-judge-evidence.md](docs/gasok-judge-evidence.md)
 - proposed wallet in-app mode:
   [docs/giwa-wallet-embedded-mode.md](docs/giwa-wallet-embedded-mode.md)

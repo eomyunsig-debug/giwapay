@@ -3,7 +3,7 @@
 Status: **review pack for the submission branch — not a claim of selection,
 partnership, audit, production readiness, or a completed public deployment**
 
-This page gives a reviewer a five-minute path from the GASOK criteria to
+This page gives a reviewer a three-minute path from the GASOK criteria to
 reproducible GiwaPay evidence. The official program lists GIWA fit, originality,
 feasibility, market potential, team capability, and GIWA Wallet fit; the
 combined MVP phase additionally evaluates actual implementation and technical
@@ -12,27 +12,35 @@ completeness.
 - Official program and criteria: <https://giwa.io/gasok>
 - Public showcase: <https://giwapay-mvp.eomyunsig.chatgpt.site>
 - Public source: <https://github.com/eomyunsig-debug/giwapay>
+- Executable-flow demo: **`[PENDING — required before submission]`**
+- Verified GIWA Explorer contract: **`[PENDING — required before submission]`**
+- Public team introduction: **`[PENDING — required before submission]`**
 - Technical one-pager: [gasok-one-pager.md](gasok-one-pager.md)
 - Pitch deck: [pitch/GiwaPay-GASOK-Pitch-Deck.pdf](pitch/GiwaPay-GASOK-Pitch-Deck.pdf)
 
-## Five-minute review path
+## Three-minute review path
 
-1. Read the [technical one-pager](gasok-one-pager.md) for the user problem,
-   execution boundary, and eight-week plan.
-2. Inspect
-   [`PaymentRouter.sol`](../packages/contracts/src/PaymentRouter.sol) and
-   [`PaymentRouter.t.sol`](../packages/contracts/test/PaymentRouter.t.sol) for
-   signed exact settlement, replay protection, adapter limits, fee handling,
-   split distribution, and refunds.
-3. Inspect
-   [`indexer-service.ts`](../apps/api/src/indexer-service.ts) for canonical
-   event verification and reorganization rollback. A submitted transaction is
-   not treated as payment success.
-4. Run `pnpm verify`. The workspace verifier checks formatting, lint, types,
-   unit and invariant tests, and production builds.
-5. Open the verified GIWA Explorer URL after it replaces the pending gate
-   below. Until then, this package must not be submitted as a verified public
+1. Watch the two-minute executable-flow demo: merchant request, customer
+   maximum input and fee, explicit wallet actions, `submitted`/`verifying`, and
+   the canonical verified receipt. Until the pending demo URL above is replaced,
+   the non-transactional showcase is context only.
+2. Open the verified GIWA Explorer contract and sanitized public manifest.
+   Confirm source verification, chain ID `91342`, source commit, runtime code,
+   owners, fee configuration, and registry references. Until the pending
+   Explorer URL above is replaced, this package must not claim a public
    deployment.
+3. Open the applicant-approved public team introduction, then read the
+   [pitch deck](pitch/GiwaPay-GASOK-Pitch-Deck.pdf) and
+   [technical one-pager](gasok-one-pager.md) for the user problem, GIWA fit, and
+   eight-week plan.
+4. Inspect
+   [`PaymentRouter.sol`](../packages/contracts/src/PaymentRouter.sol) and
+   [`indexer-service.ts`](../apps/api/src/indexer-service.ts) for signed exact
+   settlement and canonical event verification. A submitted transaction is not
+   treated as payment success.
+5. Open the successful CI run for the exact submitted commit. `pnpm verify`
+   checks formatting, lint, types, unit and invariant tests, and production
+   builds.
 
 ## Criterion-to-evidence map
 
