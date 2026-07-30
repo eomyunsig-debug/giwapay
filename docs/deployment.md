@@ -130,6 +130,12 @@ deployment command:
    pnpm deploy:giwa-sepolia
    ```
 
+   Before reconciliation, restore `current.json` to the exact tracked and clean
+   `HEAD` version. The wrapper compares the raw working-file blob directly with
+   the committed blob, in addition to checking Git status, and rejects a
+   mismatch before any RPC request. Git ignore-index flags therefore cannot
+   launder a local `deploymentScopeDirty` edit into recovered evidence.
+
    Supply the reviewed role/fee/mode variables too when the recovered artifact
    does not contain complete constructor arguments. If neither the existing
    manifest nor recovered evidence identifies the deployment source, also set

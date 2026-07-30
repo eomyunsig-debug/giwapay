@@ -116,6 +116,25 @@ if [[ "$operation" == "deploy" ]]; then
     fail "A new deployment requires the exact reviewed GIWA Sepolia not-deployed manifest placeholder; malformed, legacy, wrong-network, or evidence-bearing manifests are blocked."
 fi
 
+if ! git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1; then
+  fail "The public deployment manifest must be tracked in the reviewed commit before any deployment or recovery operation."
+fi
+manifest_head_blob="$(
+  git -C "$repository_root" rev-parse "HEAD:$manifest_relative_path"
+)" || fail "The public deployment manifest must exist in the reviewed HEAD commit."
+manifest_worktree_blob="$(
+  git -C "$repository_root" hash-object --no-filters "$manifest_path"
+)" || fail "The public deployment manifest could not be hashed for an exact HEAD comparison."
+if [[ "$(lowercase "$manifest_worktree_blob")" != "$(lowercase "$manifest_head_blob")" ]]; then
+  fail "The public deployment manifest must exactly match the reviewed HEAD blob before any deployment or recovery operation."
+fi
+manifest_status="$(
+  git -C "$repository_root" status --porcelain -- "$manifest_relative_path"
+)"
+if [[ -n "$manifest_status" ]]; then
+  fail "The public deployment manifest must be clean in the reviewed commit before any deployment or recovery operation."
+fi
+
 giwa_rpc_url="${GIWA_RPC_URL:-https://sepolia-rpc.giwa.io}"
 actual_chain_id="$(ETH_RPC_URL="$giwa_rpc_url" cast chain-id)"
 [[ "$actual_chain_id" == "$expected_chain_id" ]] ||
@@ -173,10 +192,6 @@ full_tree_status="$(git -C "$repository_root" status --porcelain)"
 if [[ "$operation" != "reconcile" && -n "$deployment_scope_status" ]]; then
   fail "Refusing to broadcast or verify from a dirty deployment/evidence scope. Commit and review these files first."
 fi
-if [[ "$operation" != "reconcile" ]] &&
-  ! git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1; then
-  fail "The public deployment manifest must be tracked in the reviewed commit before any broadcast or verification."
-fi
 deployment_scope_dirty_evidence=""
 full_tree_dirty_evidence=""
 if [[ "$operation" != "reconcile" ]]; then
@@ -218,7 +233,6 @@ fi
 if [[ "$operation" == "reconcile" ]]; then
   if [[ "$existing_manifest_scope_dirty" == "null" ]] &&
     [[ -z "$deployment_scope_status" ]] &&
-    git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1 &&
     git -C "$repository_root" cat-file -e "$source_commit^{commit}" >/dev/null 2>&1 &&
     git -C "$repository_root" diff --quiet "$source_commit" -- "${deployment_source_paths[@]}"; then
     deployment_scope_dirty_evidence="false"

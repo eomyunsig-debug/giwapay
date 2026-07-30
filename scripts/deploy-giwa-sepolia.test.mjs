@@ -12,6 +12,7 @@ import test from 'node:test';
 const execFileAsync = promisify(execFile);
 const scriptsDirectory = dirname(fileURLToPath(import.meta.url));
 const sourceCommit = '1234567890abcdef1234567890abcdef12345678';
+const manifestBlob = '7777777777777777777777777777777777777777';
 const deployer = '0x4444444444444444444444444444444444444444';
 const adapterManager = '0x5555555555555555555555555555555555555555';
 const feeRecipient = '0x6666666666666666666666666666666666666666';
@@ -123,13 +124,22 @@ async function createHarness(context, { status = 'broadcast-complete' } = {}) {
     join(fakeBin, 'git'),
     `#!/bin/sh
 case "$*" in
+  *"rev-parse HEAD:deployments/giwa-sepolia/current.json"*)
+    printf '%s\\n' "$FAKE_HEAD_MANIFEST_BLOB"
+    ;;
   *"rev-parse HEAD"*) printf '%s\\n' "$FAKE_SOURCE_COMMIT" ;;
+  *"hash-object --no-filters"*) printf '%s\\n' "$FAKE_WORKTREE_MANIFEST_BLOB" ;;
   *"ls-files --error-unmatch"*) [ "\${FAKE_MANIFEST_TRACKED:-true}" = "true" ] ;;
   *"cat-file -e"*) [ "\${FAKE_SOURCE_COMMIT_EXISTS:-true}" = "true" ] ;;
   *"diff --quiet"*) [ "\${FAKE_SOURCE_TREE_MATCHES:-true}" = "true" ] ;;
+  *"status --porcelain -- deployments/giwa-sepolia/current.json"*)
+    if [ "\${FAKE_MANIFEST_DIRTY:-false}" = "true" ]; then
+      printf ' M deployments/giwa-sepolia/current.json\\n'
+    fi
+    ;;
   *"status --porcelain"*)
     if [ "\${FAKE_DEPLOYMENT_SCOPE_DIRTY:-false}" = "true" ]; then
-      printf ' M deployments/giwa-sepolia/current.json\\n'
+      printf ' M packages/contracts/src/RecoveryFixture.sol\\n'
     fi
     ;;
   *) exit 2 ;;
@@ -180,6 +190,8 @@ exit "\${FAKE_FORGE_EXIT:-29}"
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH}`,
       FAKE_SOURCE_COMMIT: sourceCommit,
+      FAKE_HEAD_MANIFEST_BLOB: manifestBlob,
+      FAKE_WORKTREE_MANIFEST_BLOB: manifestBlob,
       FAKE_WALLET_ADDRESS: deployer,
       FAKE_FEE_RECIPIENT: feeRecipient,
       FAKE_MERCHANT_REGISTRY: merchantRegistry,
@@ -426,10 +438,6 @@ for (const invalidSourceEvidence of [
     name: 'recorded source commit is unavailable',
     environment: { FAKE_SOURCE_COMMIT_EXISTS: 'false' },
   },
-  {
-    name: 'the public manifest is untracked',
-    environment: { FAKE_MANIFEST_TRACKED: 'false' },
-  },
 ]) {
   test(`RECONCILE preserves unknown scope evidence when ${invalidSourceEvidence.name}`, async (context) => {
     const harness = await createHarness(context);
@@ -453,8 +461,116 @@ for (const invalidSourceEvidence of [
   });
 }
 
+test('RECONCILE rejects an untracked manifest before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
+    DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    FAKE_MANIFEST_TRACKED: 'false',
+  });
+
+  assert.match(failure.stderr, /manifest must be tracked/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+for (const committedScopeDirty of [null, true]) {
+  test(`RECONCILE rejects a dirty working-copy false before it can replace committed ${committedScopeDirty} scope evidence`, async (context) => {
+    const harness = await createHarness(context);
+    const workingManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+    workingManifest.deploymentScopeDirty = false;
+    const workingManifestText = `${JSON.stringify(workingManifest, null, 2)}\n`;
+    await writeFile(harness.manifestPath, workingManifestText);
+
+    const failure = await runExpectingFailure(harness.wrapper, {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      FAKE_MANIFEST_DIRTY: 'true',
+    });
+
+    assert.match(failure.stderr, /manifest must be clean/);
+    assert.equal(await readOptional(harness.castLog), '');
+    assert.equal(await readOptional(harness.forgeLog), '');
+    assert.equal(await readFile(harness.manifestPath, 'utf8'), workingManifestText);
+  });
+}
+
+for (const committedScopeDirty of [null, true]) {
+  test(`RECONCILE rejects an ignored manifest blob mismatch before it can replace committed ${committedScopeDirty} scope evidence`, async (context) => {
+    const harness = await createHarness(context);
+    const workingManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+    workingManifest.deploymentScopeDirty = false;
+    const workingManifestText = `${JSON.stringify(workingManifest, null, 2)}\n`;
+    await writeFile(harness.manifestPath, workingManifestText);
+
+    const failure = await runExpectingFailure(harness.wrapper, {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      FAKE_WORKTREE_MANIFEST_BLOB: '8888888888888888888888888888888888888888',
+    });
+
+    assert.match(failure.stderr, /manifest must exactly match the reviewed HEAD blob/);
+    assert.equal(await readOptional(harness.castLog), '');
+    assert.equal(await readOptional(harness.forgeLog), '');
+    assert.equal(await readFile(harness.manifestPath, 'utf8'), workingManifestText);
+  });
+}
+
+test('NEW DEPLOY rejects an ignored manifest blob mismatch before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+  await rm(harness.broadcastPath);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    CONFIRM_GIWA_SEPOLIA_DEPLOY: '91342',
+    GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
+    FAKE_WORKTREE_MANIFEST_BLOB: '8888888888888888888888888888888888888888',
+  });
+
+  assert.match(failure.stderr, /manifest must exactly match the reviewed HEAD blob/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+for (const recoveryOperation of [
+  {
+    name: 'RESUME',
+    status: 'broadcast-partial',
+    environment: {
+      RESUME_GIWA_SEPOLIA_DEPLOY: '91342',
+      GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
+    },
+  },
+  {
+    name: 'VERIFY',
+    status: 'broadcast-complete',
+    environment: { VERIFY_GIWA_SEPOLIA_DEPLOY: '91342' },
+  },
+]) {
+  test(`${recoveryOperation.name} rejects an ignored manifest blob mismatch before network or Forge`, async (context) => {
+    const harness = await createHarness(context, { status: recoveryOperation.status });
+
+    const failure = await runExpectingFailure(harness.wrapper, {
+      ...harness.environment,
+      ...recoveryOperation.environment,
+      FAKE_WORKTREE_MANIFEST_BLOB: '8888888888888888888888888888888888888888',
+    });
+
+    assert.match(failure.stderr, /manifest must exactly match the reviewed HEAD blob/);
+    assert.equal(await readOptional(harness.castLog), '');
+    assert.equal(await readOptional(harness.forgeLog), '');
+  });
+}
+
 for (const establishedScopeDirty of [false, true]) {
-  test(`RECONCILE preserves established ${establishedScopeDirty} scope evidence`, async (context) => {
+  test(`RECONCILE preserves committed ${establishedScopeDirty} scope evidence while source files are dirty`, async (context) => {
     const harness = await createHarness(context);
     const existingManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
     existingManifest.deploymentScopeDirty = establishedScopeDirty;
@@ -584,21 +700,25 @@ test('RESUME rejects account-derived deployer mismatch before Forge', async (con
 
 test('VERIFY rejects an untracked recovery manifest before Forge', async (context) => {
   const harness = await createHarness(context);
-  await runExpectingFailure(harness.wrapper, {
+  const failure = await runExpectingFailure(harness.wrapper, {
     ...harness.environment,
     VERIFY_GIWA_SEPOLIA_DEPLOY: '91342',
     FAKE_MANIFEST_TRACKED: 'false',
   });
+  assert.match(failure.stderr, /manifest must be tracked/);
+  assert.equal(await readOptional(harness.castLog), '');
   assert.equal(await readOptional(harness.forgeLog), '');
 });
 
 test('RESUME rejects a modified recovery manifest before Forge', async (context) => {
   const harness = await createHarness(context, { status: 'broadcast-partial' });
-  await runExpectingFailure(harness.wrapper, {
+  const failure = await runExpectingFailure(harness.wrapper, {
     ...harness.environment,
     RESUME_GIWA_SEPOLIA_DEPLOY: '91342',
     GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
-    FAKE_DEPLOYMENT_SCOPE_DIRTY: 'true',
+    FAKE_MANIFEST_DIRTY: 'true',
   });
+  assert.match(failure.stderr, /manifest must be clean/);
+  assert.equal(await readOptional(harness.castLog), '');
   assert.equal(await readOptional(harness.forgeLog), '');
 });
