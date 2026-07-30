@@ -82,18 +82,25 @@ export function encodeSignedPayload(value: Record<string, unknown>, secret: stri
 export function decodeSignedPayload(token: string, secret: string): unknown | undefined {
   const [payload, signature, extra] = token.split('.');
   if (!payload || !signature || extra) return undefined;
+  const decodedPayload = decodeCanonicalBase64Url(payload);
+  const presented = decodeCanonicalBase64Url(signature);
+  if (!decodedPayload || !presented) return undefined;
   const expected = createHmac('sha256', secret).update(payload, 'utf8').digest();
-  let presented: Buffer;
-  try {
-    presented = Buffer.from(signature, 'base64url');
-  } catch {
-    return undefined;
-  }
   if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
     return undefined;
   }
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return JSON.parse(decodedPayload.toString('utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeCanonicalBase64Url(value: string): Buffer | undefined {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return undefined;
+  try {
+    const decoded = Buffer.from(value, 'base64url');
+    return decoded.toString('base64url') === value ? decoded : undefined;
   } catch {
     return undefined;
   }
