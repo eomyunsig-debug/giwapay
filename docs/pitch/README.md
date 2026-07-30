@@ -8,8 +8,8 @@
 Final artifact SHA-256 values pinned by commit
 `e17ca73ec46033636c3b98b000075334116a8b7f`:
 
-- PPTX: `23cc06329208b4e8aacdbcef1e14386ea8ee9f182ea24ed1939d536599c3eb6e`
-- PDF: `68118134f025fb15c4a38bafc17971d0a162259874116e5b268ffc149a50155b`
+- PPTX: `12dd11df437bc5f40a4b75d14fcec98d66419b0af72076a6e33c254663650af0`
+- PDF: `dfd9bad7c308154c58eed6506d46d7f6f70b2da2cfeaa80beca862d533fd5775`
 
 The deck intentionally shows the verified GIWA testnet contract as
 `PENDING`. Replace that state only after the production-mode deployment,
