@@ -21,7 +21,8 @@ behalf:
 - `ADAPTER_MANAGER_ADDRESS`: reviewed nonzero least-privilege manager address
 - an explicit immutable `PLATFORM_FEE_BPS` value from `0` through `10000`;
 - explicit `PRODUCTION_MODE` and `DEPLOY_TEST_MOCKS` decisions;
-- a reviewed, clean Git commit containing the contract and deployment tooling;
+- reviewed, clean Git commits anchoring the broadcast-critical contract source
+  and the evidence tooling used to recover and publish deployment evidence;
 - the tracked, unchanged
   `deployments/giwa-sepolia/current.json` `not-deployed` placeholder;
 - preferably a dedicated GIWA Sepolia RPC provider.
@@ -39,6 +40,15 @@ uses `PRODUCTION_MODE=true` and `DEPLOY_TEST_MOCKS=false`. To deploy labelled
 mocks for a public testnet demo, use `PRODUCTION_MODE=false` and
 `DEPLOY_TEST_MOCKS=true`; the deployer must also be the initial adapter manager
 for the scripted mock configuration.
+
+Inherited `FOUNDRY_*`, `DAPP_*`, `ETH_GAS_PRICE`, and
+`ETH_PRIORITY_GAS_PRICE` overrides are rejected. Root or contract-directory
+`.env` files are also excluded from the reviewed deployment scope. The wrapper
+inspects the effective Forge configuration before any RPC request and requires
+the reviewed compiler version, optimizer, EVM target, IR mode, metadata policy,
+import roots, remappings, CREATE2 mode, and every output/cache/corpus path that
+`--force` may clear. Broadcast and resume commands force a fresh compile, so
+ignored local cache/output files are not accepted as deployment inputs.
 
 From the exact clean commit, a new deployment is intentionally verbose:
 
@@ -77,7 +87,8 @@ The public manifest records:
 
 - each tx hash, block, contract address, runtime code hash, constructor args;
 - router fee bps/recipient and registry owners/managers;
-- source commit and explorer verification;
+- the broadcast source commit, evidence-tooling commit, and explorer
+  verification;
 - earliest indexed block;
 - a SHA-256 digest of the private broadcast artifact;
 - the Foundry-recorded commit prefix and its match to the reviewed full SHA;
@@ -99,11 +110,34 @@ manifest diff before committing it. Even after explorer source verification,
 the wrapper refuses a readiness result unless every runtime code hash and the
 expected router owner, registry owner, fee policy, registry references,
 production mode, and adapter-manager grant are confirmed on-chain.
-`deploymentScopeDirty` reports the contract/deployment-tooling scope enforced by
-the wrapper; `fullTreeDirty` separately reports unrelated working-tree changes.
-For a recovery operation, `current.json` must itself be tracked, reviewed, and
-clean in `HEAD`; this makes its broadcast-artifact hash an independent Git
-anchor instead of trusting a simultaneously edited artifact and manifest.
+The two commit anchors intentionally cover different reviewed scopes:
+
+- `sourceCommit` anchors the broadcast-critical paths under
+  `packages/contracts`: contract sources, the GIWA deployment script, Foundry
+  configuration/remappings, and recursively checked Git dependencies. These
+  paths determine the deployed contract bytecode and transactions.
+- `evidenceToolingCommit` anchors `scripts/deploy-giwa-sepolia.sh`,
+  `scripts/extract-deployment.mjs`,
+  `scripts/assert-reviewed-worktree.mjs`, `package.json`, and `pnpm-lock.yaml`.
+  These files determine how recovery is guarded and how public evidence is
+  extracted.
+
+Before any RPC request, both scopes must match their recorded commits. The
+wrapper rejects tracked or untracked differences (including ignored untracked
+files), `assume-unchanged` or `skip-worktree` index flags, and missing,
+mismatched, or internally dirty submodules at any recursive depth. It compares
+raw worktree blob bytes, path sets, and executable modes directly with the
+reviewed trees, so Git clean filters or a stale stat cache cannot hide a
+different compiler input. Inherited Git repository/configuration redirects are
+rejected, the discovered repository root is checked, and Git replacement refs
+and grafts are forbidden.
+`deploymentScopeDirty` conservatively
+reports the reviewed deployment scopes enforced by these checks;
+`fullTreeDirty` separately reports unrelated working-tree changes. For a
+recovery operation, `current.json` must itself be tracked, reviewed, byte-for-
+byte identical to the blob in `HEAD`, and clean; this makes its
+broadcast-artifact hash an independent Git anchor instead of trusting a
+simultaneously edited artifact and manifest.
 
 Labelled mock deployments are fail-closed for readiness. The manifest records
 `mockReadiness=not-proven` until adapter pair/cap/enabled/test-only/code-hash
@@ -135,29 +169,36 @@ deployment command:
    the committed blob, in addition to checking Git status, and rejects a
    mismatch before any RPC request. Git ignore-index flags therefore cannot
    launder a local `deploymentScopeDirty` edit into recovered evidence.
+   When the committed manifest already records a broadcast-artifact SHA-256,
+   reconciliation also requires the recovered `run-latest.json` to match it
+   exactly; a read-only reconcile cannot silently replace that Git-anchored
+   digest. Only the exact not-deployed placeholder may establish the first
+   digest.
 
    Supply the reviewed role/fee/mode variables too when the recovered artifact
    does not contain complete constructor arguments. If neither the existing
    manifest nor recovered evidence identifies the deployment source, also set
-   `DEPLOYMENT_SOURCE_COMMIT_OVERRIDE` to the reviewed full commit SHA.
+   `DEPLOYMENT_SOURCE_COMMIT_OVERRIDE` to the reviewed full commit SHA that
+   produced the broadcast.
    Review the refreshed `current.json`, then commit that evidence file before
    any resume or standalone verification attempt. Reconciliation never grants
    permission to broadcast.
 
 3. Resume only after confirming that the manifest is partial, the remaining
    nonces are still valid, and the deployment source tree is byte-for-byte
-   identical to the recorded source commit. A later commit may contain only
-   reviewed evidence or unrelated files; it may not change the contract or
-   deployment tooling. Provide the same account, role, fee, and mode variables,
-   then use `RESUME_GIWA_SEPOLIA_DEPLOY=91342`. Foundry `--resume` may send only
-   pending transactions; it is still a privileged broadcast. The wrapper
-   permits this only for a Git-anchored `broadcast-partial` manifest, verifies
-   the broadcast artifact SHA-256, and rejects any network, source, deployer,
-   role, fee, production, or mock-mode mismatch.
+   identical to the recorded `sourceCommit`. The reviewed evidence-tooling
+   paths must independently be byte-for-byte identical to the recorded
+   `evidenceToolingCommit`. Provide the same account, role, fee, and mode
+   variables, then use `RESUME_GIWA_SEPOLIA_DEPLOY=91342`. Foundry `--resume`
+   may send only pending transactions; it is still a privileged broadcast. The
+   wrapper permits this only for a Git-anchored `broadcast-partial` manifest,
+   verifies the broadcast artifact SHA-256, and rejects any network, source,
+   evidence-tooling, deployer, role, fee, production, or mock-mode mismatch.
 4. If the broadcast is complete but verification failed, do not resume or
    redeploy. Commit the reviewed complete manifest, keep the deployment source
-   tree identical to its recorded source commit, and provide the same public
-   configuration including `DEPLOYER_ADDRESS`. Then use
+   tree and evidence tooling identical to their separately recorded commits,
+   and provide the same public configuration including `DEPLOYER_ADDRESS`. Then
+   use
    `VERIFY_GIWA_SEPOLIA_DEPLOY=91342`. This path never opens a keystore and never
    invokes `--broadcast`, `--resume`, or `--account`; it submits
    `forge verify-contract` separately for each manifest address and creation
@@ -167,6 +208,24 @@ deployment command:
    indexing, run the read-only reconcile command later with
    `RECONCILE_VERIFICATION_REQUESTED=true`. This updates the observed status
    without broadcasting.
+
+If reconciliation or extraction itself has a bug, do not check out the broken
+tooling again and do not move the broadcast source anchor. Suppose commit `A`
+is the original broadcast source:
+
+1. Fix only the evidence tooling, review it, and commit the fix as `B`, while
+   keeping the broadcast-critical contract paths byte-for-byte identical to
+   `A`.
+2. From clean `B`, run the read-only reconciliation against source `A`. Use the
+   existing manifest's `sourceCommit`, or
+   `DEPLOYMENT_SOURCE_COMMIT_OVERRIDE=A` when that field is unavailable.
+3. The refreshed manifest records `sourceCommit=A` and
+   `evidenceToolingCommit=B`. Review the manifest and commit it before invoking
+   RESUME or VERIFY.
+
+This is the only supported way for a later commit to change recovery or
+extraction tooling for an existing broadcast. It does not authorize a contract
+change, a replacement broadcast, or use of uncommitted tooling.
 
 If the broadcast artifact is lost, the wrapper intentionally refuses resume.
 Recover it from protected operator storage and reconcile every receipt; never
@@ -179,9 +238,12 @@ During reconcile, supplied role/fee/mode values are comparison inputs only.
 They cannot overwrite recorded configuration; any mismatch changes the
 manifest to `evidence-conflict`. Reconciliation preserves an existing boolean
 `deploymentScopeDirty` value. It may promote a `null` value to `false` only
-when `current.json` is tracked and clean before extraction and the current
-deployment source paths match the recorded source commit; otherwise the value
-stays `null` or otherwise untrusted and RESUME/VERIFY remain fail-closed.
+when `current.json` is tracked, clean, and identical to `HEAD` before
+extraction, the broadcast-critical scope matches `sourceCommit`, and the
+evidence-tooling scope matches `evidenceToolingCommit`, with no hidden index
+state or dirty/mismatched recursive submodule in either scope. If any
+precondition fails, reconciliation stops without promoting the value; it stays
+`null` or otherwise untrusted and RESUME/VERIFY remain fail-closed.
 
 Registry ownership acceptance is a privileged state transition. When the
 pending owner calls `AdapterRegistry.acceptOwnership`, the contract revokes

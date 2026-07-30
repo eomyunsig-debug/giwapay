@@ -102,6 +102,10 @@ const sourceCommit = process.env.DEPLOYMENT_SOURCE_COMMIT;
 if (!sourceCommitPattern.test(sourceCommit ?? '')) {
   throw new Error('DEPLOYMENT_SOURCE_COMMIT must be a full 40-character Git commit SHA');
 }
+const evidenceToolingCommit = process.env.DEPLOYMENT_EVIDENCE_TOOLING_COMMIT ?? sourceCommit;
+if (!sourceCommitPattern.test(evidenceToolingCommit)) {
+  throw new Error('DEPLOYMENT_EVIDENCE_TOOLING_COMMIT must be a full 40-character Git commit SHA');
+}
 const broadcastSourceCommit =
   typeof broadcast.commit === 'string' && /^[0-9a-fA-F]{7,40}$/.test(broadcast.commit)
     ? broadcast.commit.toLowerCase()
@@ -391,6 +395,7 @@ const manifest = {
   generatedAt: new Date().toISOString(),
   deploymentStatus,
   sourceCommit: sourceCommit.toLowerCase(),
+  evidenceToolingCommit: evidenceToolingCommit.toLowerCase(),
   deploymentScopeDirty:
     parseOptionalBoolean(process.env.DEPLOYMENT_SCOPE_DIRTY) ??
     previousManifest?.deploymentScopeDirty ??

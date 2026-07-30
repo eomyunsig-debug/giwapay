@@ -15,9 +15,11 @@ const scriptsDirectory = dirname(fileURLToPath(import.meta.url));
 const extractorPath = join(scriptsDirectory, 'extract-deployment.mjs');
 const fixturesDirectory = join(scriptsDirectory, 'fixtures', 'deployments');
 const sourceCommit = '1234567890abcdef1234567890abcdef12345678';
+const evidenceToolingCommit = 'ABCDEF12'.repeat(5);
 
 const deploymentEnvironmentNames = [
   'DEPLOYMENT_SOURCE_COMMIT',
+  'DEPLOYMENT_EVIDENCE_TOOLING_COMMIT',
   'DEPLOYMENT_RPC_URL',
   'DEPLOYMENT_EXPLORER_BASE_URL',
   'DEPLOYMENT_VERIFIER_URL',
@@ -111,6 +113,7 @@ test('emits sanitized complete public evidence and uses receipt-address correlat
   assert.equal(manifest.schemaVersion, 2);
   assert.equal(manifest.deploymentStatus, 'broadcast-complete');
   assert.equal(manifest.sourceCommit, sourceCommit);
+  assert.equal(manifest.evidenceToolingCommit, sourceCommit);
   assert.equal(manifest.broadcastArtifact.sourceCommit, sourceCommit.slice(0, 7));
   assert.equal(manifest.earliestIndexedBlock, '100');
   assert.equal(manifest.configuration.platformFeeBps, 50);
@@ -123,6 +126,25 @@ test('emits sanitized complete public evidence and uses receipt-address correlat
   );
   assert.equal(manifest.sourceBroadcast, undefined);
   assert.doesNotMatch(JSON.stringify(manifest), /GIWAPAY_DEPLOYER_ACCOUNT|sepolia-rpc/);
+});
+
+test('records a distinct reviewed evidence tooling commit in lowercase', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'giwapay-manifest-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const output = join(directory, 'distinct-tooling-commit.json');
+
+  await runExtractor({
+    fixture: 'core-success.json',
+    output,
+    environment: {
+      DEPLOYMENT_SOURCE_COMMIT: sourceCommit,
+      DEPLOYMENT_EVIDENCE_TOOLING_COMMIT: evidenceToolingCommit,
+    },
+  });
+  const manifest = JSON.parse(await readFile(output, 'utf8'));
+
+  assert.equal(manifest.sourceCommit, sourceCommit);
+  assert.equal(manifest.evidenceToolingCommit, evidenceToolingCommit.toLowerCase());
 });
 
 test('records partial broadcast evidence without claiming completion or verification', async (context) => {
@@ -368,6 +390,18 @@ test('rejects chain/source ambiguity and preserves an existing public manifest',
       fixture: 'core-success.json',
       output,
       environment: { DEPLOYMENT_SOURCE_COMMIT: 'short' },
+    }),
+  );
+  assert.equal(await readFile(output, 'utf8'), sentinel);
+
+  await assert.rejects(
+    runExtractor({
+      fixture: 'core-success.json',
+      output,
+      environment: {
+        DEPLOYMENT_SOURCE_COMMIT: sourceCommit,
+        DEPLOYMENT_EVIDENCE_TOOLING_COMMIT: 'not-a-full-commit',
+      },
     }),
   );
   assert.equal(await readFile(output, 'utf8'), sentinel);

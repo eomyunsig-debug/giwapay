@@ -5,6 +5,7 @@
   "mode": "giwa-sepolia",
   "deploymentStatus": "not-deployed",
   "sourceCommit": null,
+  "evidenceToolingCommit": null,
   "deploymentScopeDirty": null,
   "fullTreeDirty": null,
   "contracts": {},

@@ -3,18 +3,39 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 contracts_dir="$repository_root/packages/contracts"
-broadcast_path="$contracts_dir/broadcast/DeployGiwaSepolia.s.sol/91342/run-latest.json"
+broadcast_dir="$contracts_dir/broadcast/DeployGiwaSepolia.s.sol/91342"
+legacy_broadcast_path="$broadcast_dir/run-latest.json"
+broadcast_path="$legacy_broadcast_path"
 manifest_path="$repository_root/deployments/giwa-sepolia/current.json"
 manifest_relative_path="deployments/giwa-sepolia/current.json"
 expected_chain_id="91342"
 expected_genesis_hash="0xca1b5fee64a196abfca007b3a4d4e3ec2b37be83a452d452bf4e45937004cab2"
-deployment_source_paths=(
-  packages/contracts
+reviewed_worktree_checker="$repository_root/scripts/assert-reviewed-worktree.mjs"
+broadcast_source_paths=(
+  .env
+  packages/contracts/src
+  packages/contracts/script/DeployGiwaSepolia.s.sol
+  packages/contracts/foundry.toml
+  packages/contracts/remappings.txt
+  packages/contracts/.env
+  packages/contracts/lib/forge-std
+  packages/contracts/lib/openzeppelin-contracts
+)
+evidence_tooling_paths=(
   scripts/deploy-giwa-sepolia.sh
   scripts/extract-deployment.mjs
+  scripts/assert-reviewed-worktree.mjs
   package.json
   pnpm-lock.yaml
 )
+sealed_repository_root=""
+
+cleanup_sealed_repository() {
+  if [[ -n "$sealed_repository_root" && -d "$sealed_repository_root" ]]; then
+    rm -rf -- "$sealed_repository_root"
+  fi
+}
+trap cleanup_sealed_repository EXIT
 
 fail() {
   echo "$*" >&2
@@ -25,12 +46,56 @@ lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
-for executable in forge cast node git; do
+reviewed_git() {
+  env \
+    -u GIT_DIR \
+    -u GIT_WORK_TREE \
+    -u GIT_INDEX_FILE \
+    -u GIT_COMMON_DIR \
+    -u GIT_OBJECT_DIRECTORY \
+    -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+    -u GIT_REPLACE_REF_BASE \
+    -u GIT_NAMESPACE \
+    -u GIT_SHALLOW_FILE \
+    -u GIT_CONFIG_COUNT \
+    -u GIT_CONFIG_PARAMETERS \
+    -u GIT_CONFIG_GLOBAL \
+    -u GIT_CONFIG_SYSTEM \
+    GIT_NO_REPLACE_OBJECTS=1 \
+    git "$@"
+}
+
+for executable in forge cast node git tar mktemp; do
   if ! command -v "$executable" >/dev/null 2>&1; then
     fail "Required executable is unavailable: $executable"
   fi
 done
+foundry_override_names=()
+git_redirect_names=()
+while IFS= read -r environment_name; do
+  case "$environment_name" in
+    FOUNDRY_* | DAPP_* | ETH_GAS_PRICE | ETH_PRIORITY_GAS_PRICE)
+      foundry_override_names+=("$environment_name")
+      ;;
+    GIT_DIR | GIT_WORK_TREE | GIT_INDEX_FILE | GIT_COMMON_DIR | GIT_OBJECT_DIRECTORY | \
+      GIT_ALTERNATE_OBJECT_DIRECTORIES | GIT_REPLACE_REF_BASE | GIT_NAMESPACE | \
+      GIT_SHALLOW_FILE | GIT_CONFIG_COUNT | GIT_CONFIG_PARAMETERS | GIT_CONFIG_GLOBAL | \
+      GIT_CONFIG_SYSTEM | GIT_CONFIG_KEY_* | GIT_CONFIG_VALUE_*)
+      git_redirect_names+=("$environment_name")
+      ;;
+  esac
+done < <(compgen -e)
+if ((${#foundry_override_names[@]} > 0)); then
+  fail "Unset inherited Foundry/Dapp configuration overrides before deployment: ${foundry_override_names[*]}"
+fi
+if ((${#git_redirect_names[@]} > 0)); then
+  fail "Unset inherited Git repository/configuration redirects before deployment: ${git_redirect_names[*]}"
+fi
 node --check "$repository_root/scripts/extract-deployment.mjs" >/dev/null
+node --check "$reviewed_worktree_checker" >/dev/null
+replacement_refs="$(reviewed_git -C "$repository_root" replace -l)"
+[[ -z "$replacement_refs" ]] ||
+  fail "Git replacement refs are not allowed for deployment or recovery."
 [[ ! -e "$manifest_path" || -w "$manifest_path" ]] ||
   fail "The public deployment manifest is not writable."
 node -e '
@@ -98,6 +163,7 @@ if [[ "$operation" == "deploy" ]]; then
       manifest.mode === "giwa-sepolia" &&
       manifest.deploymentStatus === "not-deployed" &&
       manifest.sourceCommit === null &&
+      manifest.evidenceToolingCommit === null &&
       manifest.deploymentScopeDirty === null &&
       manifest.fullTreeDirty === null &&
       isEmptyRecord(manifest.contracts) &&
@@ -116,36 +182,28 @@ if [[ "$operation" == "deploy" ]]; then
     fail "A new deployment requires the exact reviewed GIWA Sepolia not-deployed manifest placeholder; malformed, legacy, wrong-network, or evidence-bearing manifests are blocked."
 fi
 
-if ! git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1; then
+if ! reviewed_git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1; then
   fail "The public deployment manifest must be tracked in the reviewed commit before any deployment or recovery operation."
 fi
 manifest_head_blob="$(
-  git -C "$repository_root" rev-parse "HEAD:$manifest_relative_path"
+  reviewed_git -C "$repository_root" rev-parse "HEAD:$manifest_relative_path"
 )" || fail "The public deployment manifest must exist in the reviewed HEAD commit."
 manifest_worktree_blob="$(
-  git -C "$repository_root" hash-object --no-filters "$manifest_path"
+  reviewed_git -C "$repository_root" hash-object --no-filters "$manifest_path"
 )" || fail "The public deployment manifest could not be hashed for an exact HEAD comparison."
 if [[ "$(lowercase "$manifest_worktree_blob")" != "$(lowercase "$manifest_head_blob")" ]]; then
   fail "The public deployment manifest must exactly match the reviewed HEAD blob before any deployment or recovery operation."
 fi
 manifest_status="$(
-  git -C "$repository_root" status --porcelain -- "$manifest_relative_path"
+  reviewed_git -C "$repository_root" status --porcelain -- "$manifest_relative_path"
 )"
 if [[ -n "$manifest_status" ]]; then
   fail "The public deployment manifest must be clean in the reviewed commit before any deployment or recovery operation."
 fi
 
-giwa_rpc_url="${GIWA_RPC_URL:-https://sepolia-rpc.giwa.io}"
-actual_chain_id="$(ETH_RPC_URL="$giwa_rpc_url" cast chain-id)"
-[[ "$actual_chain_id" == "$expected_chain_id" ]] ||
-  fail "Refusing to continue: configured RPC reported chain ID $actual_chain_id, expected $expected_chain_id."
-
-actual_genesis_hash="$(ETH_RPC_URL="$giwa_rpc_url" cast block 0 --field hash)"
-[[ "$(lowercase "$actual_genesis_hash")" == "$expected_genesis_hash" ]] ||
-  fail "Refusing to continue: chain ID matches but the genesis block is not the reviewed GIWA Sepolia genesis."
-
-current_source_commit="$(git -C "$repository_root" rev-parse HEAD)"
+current_source_commit="$(reviewed_git -C "$repository_root" rev-parse HEAD)"
 source_commit="$current_source_commit"
+evidence_tooling_commit="$current_source_commit"
 existing_manifest_status="$(
   node -e '
     const fs = require("node:fs");
@@ -168,6 +226,20 @@ existing_manifest_source_commit="$(
     } catch {}
   ' "$manifest_path"
 )"
+existing_manifest_evidence_tooling_commit="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
+      process.stdout.write(
+        /^[0-9a-fA-F]{40}$/.test(manifest.evidenceToolingCommit ?? "")
+          ? manifest.evidenceToolingCommit
+          : "",
+      );
+    } catch {}
+  ' "$manifest_path"
+)"
 existing_manifest_scope_dirty="$(
   node -e '
     const fs = require("node:fs");
@@ -182,23 +254,24 @@ existing_manifest_scope_dirty="$(
     }
   ' "$manifest_path"
 )"
-
-deployment_scope_status="$(
-  git -C "$repository_root" status --porcelain -- \
-    "${deployment_source_paths[@]}" \
-    "$manifest_relative_path"
+existing_manifest_broadcast_sha256="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
+      if (!Object.hasOwn(manifest, "broadcastArtifact")) {
+        process.stdout.write("none");
+      } else if (/^[0-9a-fA-F]{64}$/.test(manifest.broadcastArtifact?.sha256 ?? "")) {
+        process.stdout.write(manifest.broadcastArtifact.sha256.toLowerCase());
+      } else {
+        process.stdout.write("invalid");
+      }
+    } catch {
+      process.stdout.write("invalid");
+    }
+  ' "$manifest_path"
 )"
-full_tree_status="$(git -C "$repository_root" status --porcelain)"
-if [[ "$operation" != "reconcile" && -n "$deployment_scope_status" ]]; then
-  fail "Refusing to broadcast or verify from a dirty deployment/evidence scope. Commit and review these files first."
-fi
-deployment_scope_dirty_evidence=""
-full_tree_dirty_evidence=""
-if [[ "$operation" != "reconcile" ]]; then
-  deployment_scope_dirty_evidence="false"
-  full_tree_dirty_evidence="false"
-  [[ -n "$full_tree_status" ]] && full_tree_dirty_evidence="true"
-fi
 
 if [[ "$operation" == "deploy" ]]; then
   [[ ! -e "$broadcast_path" ]] ||
@@ -221,23 +294,142 @@ else
     source_commit="$DEPLOYMENT_SOURCE_COMMIT_OVERRIDE"
   elif [[ "$operation" == "reconcile" ]]; then
     fail "Reconciliation without an existing source SHA requires DEPLOYMENT_SOURCE_COMMIT_OVERRIDE with the reviewed deployment commit."
-  elif [[ "$operation" == "resume" ]]; then
-    fail "Resume requires a reconciled public manifest with the reviewed source SHA."
+  else
+    fail "Resume and verification require a reconciled public manifest with the reviewed broadcast source SHA."
   fi
-  if [[ "$operation" != "reconcile" ]] &&
-    [[ "$(lowercase "$source_commit")" != "$(lowercase "$current_source_commit")" ]] &&
-    ! git -C "$repository_root" diff --quiet "$source_commit" -- "${deployment_source_paths[@]}"; then
-    fail "Resume and verification require deployment source identical to the recorded source commit; only reviewed evidence-only commits may follow it."
+  if [[ "$operation" != "reconcile" ]]; then
+    [[ -n "$existing_manifest_evidence_tooling_commit" ]] ||
+      fail "Resume and verification require a reconciled public manifest with the reviewed evidence tooling SHA."
+    evidence_tooling_commit="$existing_manifest_evidence_tooling_commit"
   fi
 fi
+
 if [[ "$operation" == "reconcile" ]]; then
-  if [[ "$existing_manifest_scope_dirty" == "null" ]] &&
-    [[ -z "$deployment_scope_status" ]] &&
-    git -C "$repository_root" cat-file -e "$source_commit^{commit}" >/dev/null 2>&1 &&
-    git -C "$repository_root" diff --quiet "$source_commit" -- "${deployment_source_paths[@]}"; then
-    deployment_scope_dirty_evidence="false"
-  fi
+  case "$existing_manifest_broadcast_sha256" in
+    none)
+      [[ "$existing_manifest_status" == "not-deployed" ]] ||
+        fail "Only an exact not-deployed manifest may establish the first broadcast artifact digest."
+      ;;
+    invalid)
+      fail "Reconciliation requires a valid committed broadcast artifact SHA-256 or the exact not-deployed placeholder."
+      ;;
+    *)
+      current_broadcast_sha256="$(
+        node -e '
+          const crypto = require("node:crypto");
+          const fs = require("node:fs");
+          const bytes = fs.readFileSync(process.argv[1]);
+          process.stdout.write(crypto.createHash("sha256").update(bytes).digest("hex"));
+        ' "$broadcast_path"
+      )"
+      [[ "$current_broadcast_sha256" == "$existing_manifest_broadcast_sha256" ]] ||
+        fail "Reconciliation refuses to replace the committed broadcast artifact SHA-256; restore the original run-latest.json."
+      ;;
+  esac
 fi
+
+node "$reviewed_worktree_checker" \
+  "$repository_root" \
+  "$source_commit" \
+  "${broadcast_source_paths[@]}" ||
+  fail "Broadcast-critical source must exactly match its reviewed commit, without hidden index flags, untracked files, or dirty nested dependencies."
+node "$reviewed_worktree_checker" \
+  "$repository_root" \
+  "$evidence_tooling_commit" \
+  "${evidence_tooling_paths[@]}" ||
+  fail "Deployment and evidence tooling must exactly match its reviewed commit, without hidden index flags or untracked files."
+
+if ! (
+  cd "$contracts_dir"
+  forge config --json
+) | node -e '
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    input += chunk;
+  });
+  process.stdin.on("end", () => {
+    let config;
+    try {
+      config = JSON.parse(input);
+    } catch {
+      process.exit(1);
+    }
+    const exact = (actual, expected) =>
+      JSON.stringify(actual) === JSON.stringify(expected);
+    const valid =
+      config.src === "src" &&
+      config.script === "script" &&
+      config.out === "out" &&
+      exact(config.libs, ["lib"]) &&
+      exact(config.remappings, [
+        "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+        "forge-std/=lib/forge-std/src/",
+      ]) &&
+      typeof config.auto_detect_remappings === "boolean" &&
+      exact(config.libraries, []) &&
+      exact(config.include_paths, []) &&
+      exact(config.allow_paths, []) &&
+      exact(config.skip, []) &&
+      config.cache_path === "cache" &&
+      config.broadcast === "broadcast" &&
+      config.build_info_path === null &&
+      config.test_failures_file === "cache/test-failures" &&
+      config.fuzz?.failure_persist_dir === "cache/fuzz" &&
+      config.fuzz?.corpus_dir === null &&
+      config.invariant?.failure_persist_dir === "cache/invariant" &&
+      config.invariant?.corpus_dir === null &&
+      config.network === null &&
+      config.celo === false &&
+      config.hardfork === null &&
+      config.fork_block_number === null &&
+      config.chain_id === null &&
+      config.isolate === false &&
+      config.script_execution_protection === true &&
+      config.solc === "0.8.28" &&
+      config.evm_version === "cancun" &&
+      config.optimizer === true &&
+      config.optimizer_runs === 20000 &&
+      config.optimizer_details === null &&
+      config.via_ir === true &&
+      config.bytecode_hash === "none" &&
+      config.cbor_metadata === false &&
+      config.revert_strings === null &&
+      config.sparse_mode === false &&
+      config.ffi === false &&
+      config.always_use_create_2_factory === false &&
+      config.use_literal_content === false &&
+      exact(config.additional_compiler_profiles, []) &&
+      exact(config.compilation_restrictions, []);
+    if (!valid) process.exit(1);
+  });
+'; then
+  fail "Effective Foundry deployment configuration differs from the reviewed profile."
+fi
+
+deployment_scope_dirty_evidence=""
+full_tree_dirty_evidence=""
+if [[ "$operation" == "reconcile" ]]; then
+  case "$existing_manifest_scope_dirty" in
+    null) deployment_scope_dirty_evidence="false" ;;
+    true | false) deployment_scope_dirty_evidence="$existing_manifest_scope_dirty" ;;
+    *) fail "Reconciliation requires deploymentScopeDirty to be true, false, or null." ;;
+  esac
+else
+  deployment_scope_dirty_evidence="false"
+  full_tree_dirty_evidence="false"
+  full_tree_status="$(reviewed_git -C "$repository_root" status --porcelain --untracked-files=all)"
+  [[ -n "$full_tree_status" ]] && full_tree_dirty_evidence="true"
+fi
+
+giwa_rpc_url="${GIWA_RPC_URL:-https://sepolia-rpc.giwa.io}"
+actual_chain_id="$(ETH_RPC_URL="$giwa_rpc_url" cast chain-id)"
+[[ "$actual_chain_id" == "$expected_chain_id" ]] ||
+  fail "Refusing to continue: configured RPC reported chain ID $actual_chain_id, expected $expected_chain_id."
+
+actual_genesis_hash="$(ETH_RPC_URL="$giwa_rpc_url" cast block 0 --field hash)"
+[[ "$(lowercase "$actual_genesis_hash")" == "$expected_genesis_hash" ]] ||
+  fail "Refusing to continue: chain ID matches but the genesis block is not the reviewed GIWA Sepolia genesis."
 
 require_nonzero_address() {
   local variable_name="$1"
@@ -306,7 +498,13 @@ validate_recovery_manifest() {
   node -e '
     const crypto = require("node:crypto");
     const fs = require("node:fs");
-    const [manifestPath, broadcastPath, sourceCommit, expectedStatus] = process.argv.slice(1);
+    const [
+      manifestPath,
+      broadcastPath,
+      sourceCommit,
+      evidenceToolingCommit,
+      expectedStatus,
+    ] = process.argv.slice(1);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     const broadcast = fs.readFileSync(broadcastPath);
     const broadcastJson = JSON.parse(broadcast.toString("utf8"));
@@ -330,6 +528,12 @@ validate_recovery_manifest() {
     if (manifest.deploymentStatus !== expectedStatus) failures.push("deployment status");
     if ((manifest.sourceCommit ?? "").toLowerCase() !== sourceCommit.toLowerCase()) {
       failures.push("source SHA");
+    }
+    if (
+      (manifest.evidenceToolingCommit ?? "").toLowerCase() !==
+      evidenceToolingCommit.toLowerCase()
+    ) {
+      failures.push("evidence tooling SHA");
     }
     if (manifest.broadcastArtifact?.sha256 !== digest) failures.push("broadcast SHA-256");
     if (embeddedCommit === null || !reviewedCommit.startsWith(embeddedCommit)) {
@@ -364,7 +568,12 @@ validate_recovery_manifest() {
       process.stderr.write(`Recovery evidence mismatch: ${failures.join(", ")}\n`);
       process.exit(1);
     }
-  ' "$manifest_path" "$broadcast_path" "$source_commit" "$expected_status" ||
+  ' \
+    "$manifest_path" \
+    "$broadcast_path" \
+    "$source_commit" \
+    "$evidence_tooling_commit" \
+    "$expected_status" ||
     fail "Recovery preflight rejected the manifest or broadcast artifact before Forge was invoked."
 }
 
@@ -377,6 +586,7 @@ fi
 run_extractor() {
   local verification_requested_value="${1:-}"
   DEPLOYMENT_SOURCE_COMMIT="$source_commit" \
+    DEPLOYMENT_EVIDENCE_TOOLING_COMMIT="$evidence_tooling_commit" \
     DEPLOYMENT_RPC_URL="$giwa_rpc_url" \
     DEPLOYMENT_EXPLORER_BASE_URL="${GIWA_EXPLORER_URL:-https://sepolia-explorer.giwa.io}" \
     DEPLOYMENT_VERIFIER_URL="${GIWA_EXPLORER_API_URL:-https://sepolia-explorer.giwa.io/api}" \
@@ -427,6 +637,7 @@ if [[ "$operation" != "verify" ]]; then
     script/DeployGiwaSepolia.s.sol:DeployGiwaSepolia
     --account "$GIWAPAY_DEPLOYER_ACCOUNT"
     --broadcast
+    --force
     --rpc-url "$giwa_rpc_url"
   )
   if [[ "$operation" == "resume" ]]; then

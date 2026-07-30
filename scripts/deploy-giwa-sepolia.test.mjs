@@ -12,6 +12,7 @@ import test from 'node:test';
 const execFileAsync = promisify(execFile);
 const scriptsDirectory = dirname(fileURLToPath(import.meta.url));
 const sourceCommit = '1234567890abcdef1234567890abcdef12345678';
+const toolingCommit = 'abcdef1234567890abcdef1234567890abcdef12';
 const manifestBlob = '7777777777777777777777777777777777777777';
 const deployer = '0x4444444444444444444444444444444444444444';
 const adapterManager = '0x5555555555555555555555555555555555555555';
@@ -19,6 +20,31 @@ const feeRecipient = '0x6666666666666666666666666666666666666666';
 const merchantRegistry = '0x1111111111111111111111111111111111111111';
 const adapterRegistry = '0x2222222222222222222222222222222222222222';
 const paymentRouter = '0x3333333333333333333333333333333333333333';
+const gitRedirectEnvironmentNames = new Set([
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_COMMON_DIR',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_NAMESPACE',
+  'GIT_SHALLOW_FILE',
+  'GIT_CONFIG_COUNT',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+]);
+const inheritedEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([name]) =>
+      !name.startsWith('FOUNDRY_') &&
+      !name.startsWith('DAPP_') &&
+      !gitRedirectEnvironmentNames.has(name) &&
+      !name.startsWith('GIT_CONFIG_KEY_') &&
+      !name.startsWith('GIT_CONFIG_VALUE_'),
+  ),
+);
 
 async function createHarness(context, { status = 'broadcast-complete' } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'giwapay-wrapper-'));
@@ -45,6 +71,10 @@ async function createHarness(context, { status = 'broadcast-complete' } = {}) {
   await copyFile(
     join(scriptsDirectory, 'extract-deployment.mjs'),
     join(scriptDirectory, 'extract-deployment.mjs'),
+  );
+  await copyFile(
+    join(scriptsDirectory, 'assert-reviewed-worktree.mjs'),
+    join(scriptDirectory, 'assert-reviewed-worktree.mjs'),
   );
   await chmod(wrapper, 0o755);
 
@@ -92,6 +122,7 @@ async function createHarness(context, { status = 'broadcast-complete' } = {}) {
     mode: 'giwa-sepolia',
     deploymentStatus: status,
     sourceCommit,
+    evidenceToolingCommit: sourceCommit,
     deploymentScopeDirty: false,
     fullTreeDirty: false,
     broadcastArtifact: {
@@ -124,14 +155,40 @@ async function createHarness(context, { status = 'broadcast-complete' } = {}) {
     join(fakeBin, 'git'),
     `#!/bin/sh
 case "$*" in
+  *"replace -l"*)
+    if [ "\${FAKE_REPLACEMENT_REF:-false}" = "true" ]; then
+      printf '%s\\n' "$FAKE_SOURCE_COMMIT"
+    fi
+    ;;
+  *"rev-parse --show-toplevel"*) pwd -P ;;
+  *"rev-parse --git-path info/grafts"*) printf '.git/info/grafts\\n' ;;
+  *"rev-parse --show-toplevel"*) printf '%s\\n' "$FAKE_REPOSITORY_ROOT" ;;
   *"rev-parse HEAD:deployments/giwa-sepolia/current.json"*)
     printf '%s\\n' "$FAKE_HEAD_MANIFEST_BLOB"
     ;;
   *"rev-parse HEAD"*) printf '%s\\n' "$FAKE_SOURCE_COMMIT" ;;
   *"hash-object --no-filters"*) printf '%s\\n' "$FAKE_WORKTREE_MANIFEST_BLOB" ;;
   *"ls-files --error-unmatch"*) [ "\${FAKE_MANIFEST_TRACKED:-true}" = "true" ] ;;
+  *"ls-files -v -z"*)
+    if [ "\${FAKE_HIDDEN_INDEX_STATE:-false}" = "true" ]; then
+      printf 'S packages/contracts/src/Hidden.sol\\0'
+    fi
+    ;;
+  *"ls-files --others -z"*)
+    if [ "\${FAKE_IGNORED_UNTRACKED:-false}" = "true" ]; then
+      printf 'packages/contracts/src/Ignored.sol\\0'
+    elif [ "\${FAKE_DEPLOYMENT_SCOPE_DIRTY:-false}" = "true" ]; then
+      printf 'packages/contracts/src/RecoveryFixture.sol\\0'
+    fi
+    ;;
+  *"ls-tree -r -z"*"packages/contracts"*)
+    [ "\${FAKE_BROADCAST_TREE_MATCHES:-\${FAKE_SOURCE_TREE_MATCHES:-true}}" = "true" ]
+    ;;
+  *"ls-tree -r -z"*)
+    [ "\${FAKE_TOOLING_TREE_MATCHES:-\${FAKE_SOURCE_TREE_MATCHES:-true}}" = "true" ]
+    ;;
+  *"ls-files -s -z"*) ;;
   *"cat-file -e"*) [ "\${FAKE_SOURCE_COMMIT_EXISTS:-true}" = "true" ] ;;
-  *"diff --quiet"*) [ "\${FAKE_SOURCE_TREE_MATCHES:-true}" = "true" ] ;;
   *"status --porcelain -- deployments/giwa-sepolia/current.json"*)
     if [ "\${FAKE_MANIFEST_DIRTY:-false}" = "true" ]; then
       printf ' M deployments/giwa-sepolia/current.json\\n'
@@ -174,6 +231,16 @@ esac
   await writeExecutable(
     join(fakeBin, 'forge'),
     `#!/bin/sh
+if [ "$*" = "config --json" ]; then
+  if [ "\${FAKE_FORGE_CONFIG_INVALID:-false}" = "true" ]; then
+    printf '%s\\n' '{"src":"src","script":"script","out":"out","libs":["lib"],"remappings":["forge-std/=/tmp/unreviewed/"],"auto_detect_remappings":false,"libraries":[],"include_paths":[],"allow_paths":[],"skip":[],"cache_path":"cache","broadcast":"broadcast","solc":"0.8.28","evm_version":"cancun","optimizer":true,"optimizer_runs":1,"optimizer_details":null,"via_ir":true,"bytecode_hash":"none","cbor_metadata":false,"revert_strings":null,"sparse_mode":false,"ffi":false,"always_use_create_2_factory":false,"use_literal_content":false,"additional_compiler_profiles":[],"compilation_restrictions":[]}'
+  else
+    cat <<EOF
+{"src":"src","script":"script","out":"out","libs":["lib"],"remappings":["@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/","forge-std/=lib/forge-std/src/"],"auto_detect_remappings":\${FAKE_FORGE_AUTO_DETECT_REMAPPINGS:-false},"libraries":[],"include_paths":[],"allow_paths":[],"skip":[],"cache_path":"\${FAKE_FORGE_CACHE_PATH:-cache}","broadcast":"\${FAKE_FORGE_BROADCAST_PATH:-broadcast}","build_info_path":\${FAKE_FORGE_BUILD_INFO_PATH_JSON:-null},"test_failures_file":"\${FAKE_FORGE_TEST_FAILURES_PATH:-cache/test-failures}","fuzz":{"failure_persist_dir":"\${FAKE_FORGE_FUZZ_FAILURE_PATH:-cache/fuzz}","corpus_dir":\${FAKE_FORGE_FUZZ_CORPUS_PATH_JSON:-null}},"invariant":{"failure_persist_dir":"\${FAKE_FORGE_INVARIANT_FAILURE_PATH:-cache/invariant}","corpus_dir":\${FAKE_FORGE_INVARIANT_CORPUS_PATH_JSON:-null}},"network":\${FAKE_FORGE_NETWORK_JSON:-null},"celo":\${FAKE_FORGE_CELO:-false},"hardfork":\${FAKE_FORGE_HARDFORK_JSON:-null},"fork_block_number":\${FAKE_FORGE_FORK_BLOCK_NUMBER_JSON:-null},"chain_id":\${FAKE_FORGE_CHAIN_ID_JSON:-null},"isolate":\${FAKE_FORGE_ISOLATE:-false},"script_execution_protection":\${FAKE_FORGE_SCRIPT_PROTECTION:-true},"solc":"0.8.28","evm_version":"cancun","optimizer":true,"optimizer_runs":20000,"optimizer_details":null,"via_ir":true,"bytecode_hash":"none","cbor_metadata":false,"revert_strings":null,"sparse_mode":false,"ffi":false,"always_use_create_2_factory":\${FAKE_FORGE_ALWAYS_CREATE2:-false},"use_literal_content":false,"additional_compiler_profiles":[],"compilation_restrictions":[]}
+EOF
+  fi
+  exit 0
+fi
 printf '%s|%s\\n' "$ETH_RPC_URL" "$*" >> "$FAKE_FORGE_LOG"
 exit "\${FAKE_FORGE_EXIT:-29}"
 `,
@@ -187,9 +254,10 @@ exit "\${FAKE_FORGE_EXIT:-29}"
     forgeLog,
     castLog,
     environment: {
-      ...process.env,
+      ...inheritedEnvironment,
       PATH: `${fakeBin}:${process.env.PATH}`,
       FAKE_SOURCE_COMMIT: sourceCommit,
+      FAKE_REPOSITORY_ROOT: root,
       FAKE_HEAD_MANIFEST_BLOB: manifestBlob,
       FAKE_WORKTREE_MANIFEST_BLOB: manifestBlob,
       FAKE_WALLET_ADDRESS: deployer,
@@ -240,6 +308,7 @@ function notDeployedManifest(overrides = {}) {
     mode: 'giwa-sepolia',
     deploymentStatus: 'not-deployed',
     sourceCommit: null,
+    evidenceToolingCommit: null,
     deploymentScopeDirty: null,
     fullTreeDirty: null,
     contracts: {},
@@ -363,6 +432,205 @@ test('NEW DEPLOY accepts only the exact reviewed not-deployed placeholder', asyn
 
   assert.match(await readOptional(harness.castLog), /^chain-id$/m);
   assert.match(await readOptional(harness.forgeLog), /--broadcast/);
+  assert.match(await readOptional(harness.forgeLog), /--force/);
+});
+
+test('NEW DEPLOY rejects inherited Foundry configuration overrides before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+  await rm(harness.broadcastPath);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    CONFIRM_GIWA_SEPOLIA_DEPLOY: '91342',
+    GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
+    FOUNDRY_OPTIMIZER_RUNS: '1',
+  });
+
+  assert.match(failure.stderr, /Unset inherited Foundry\/Dapp configuration overrides/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+for (const gasPriceEnvironmentName of ['ETH_GAS_PRICE', 'ETH_PRIORITY_GAS_PRICE']) {
+  test(`NEW DEPLOY rejects inherited ${gasPriceEnvironmentName} before network or Forge`, async (context) => {
+    const harness = await createHarness(context);
+    await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+    await rm(harness.broadcastPath);
+
+    const failure = await runExpectingFailure(harness.wrapper, {
+      ...harness.environment,
+      CONFIRM_GIWA_SEPOLIA_DEPLOY: '91342',
+      GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
+      [gasPriceEnvironmentName]: '999999999999',
+    });
+
+    assert.match(failure.stderr, /Unset inherited Foundry\/Dapp configuration overrides/);
+    assert.equal(await readOptional(harness.castLog), '');
+    assert.equal(await readOptional(harness.forgeLog), '');
+  });
+}
+
+test('NEW DEPLOY rejects Git replacement refs before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+  await rm(harness.broadcastPath);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    CONFIRM_GIWA_SEPOLIA_DEPLOY: '91342',
+    GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
+    FAKE_REPLACEMENT_REF: 'true',
+  });
+
+  assert.match(failure.stderr, /Git replacement refs are not allowed/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('NEW DEPLOY rejects inherited Git repository redirects before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    CONFIRM_GIWA_SEPOLIA_DEPLOY: '91342',
+    GIWAPAY_DEPLOYER_ACCOUNT: 'fixture-account',
+    GIT_DIR: '/tmp/unreviewed-giwapay.git',
+    GIT_WORK_TREE: harness.root,
+  });
+
+  assert.match(failure.stderr, /Unset inherited Git repository\/configuration redirects/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('RECONCILE rejects an effective compiler or import configuration mismatch before network', async (context) => {
+  const harness = await createHarness(context);
+  const manifestText = `${JSON.stringify(notDeployedManifest(), null, 2)}\n`;
+  await writeFile(harness.manifestPath, manifestText);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
+    DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    FAKE_FORGE_CONFIG_INVALID: 'true',
+  });
+
+  assert.match(failure.stderr, /Effective Foundry deployment configuration differs/);
+  assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+for (const unsafeFoundryPath of [
+  {
+    name: 'cache path',
+    environment: { FAKE_FORGE_CACHE_PATH: '/tmp/unreviewed-cache' },
+  },
+  {
+    name: 'broadcast path',
+    environment: { FAKE_FORGE_BROADCAST_PATH: '/tmp/unreviewed-broadcast' },
+  },
+  {
+    name: 'CREATE2 factory mode',
+    environment: { FAKE_FORGE_ALWAYS_CREATE2: 'true' },
+  },
+  {
+    name: 'build-info cleanup path',
+    environment: { FAKE_FORGE_BUILD_INFO_PATH_JSON: '"/tmp/unreviewed-build-info"' },
+  },
+  {
+    name: 'test-failure cleanup path',
+    environment: { FAKE_FORGE_TEST_FAILURES_PATH: '/tmp/unreviewed-test-failures' },
+  },
+  {
+    name: 'fuzz failure cleanup path',
+    environment: { FAKE_FORGE_FUZZ_FAILURE_PATH: '/tmp/unreviewed-fuzz-failures' },
+  },
+  {
+    name: 'fuzz corpus cleanup path',
+    environment: { FAKE_FORGE_FUZZ_CORPUS_PATH_JSON: '"/tmp/unreviewed-fuzz-corpus"' },
+  },
+  {
+    name: 'invariant failure cleanup path',
+    environment: { FAKE_FORGE_INVARIANT_FAILURE_PATH: '/tmp/unreviewed-invariant-failures' },
+  },
+  {
+    name: 'invariant corpus cleanup path',
+    environment: {
+      FAKE_FORGE_INVARIANT_CORPUS_PATH_JSON: '"/tmp/unreviewed-invariant-corpus"',
+    },
+  },
+  {
+    name: 'network mode',
+    environment: { FAKE_FORGE_NETWORK_JSON: '"tempo"' },
+  },
+  {
+    name: 'Celo transaction mode',
+    environment: { FAKE_FORGE_CELO: 'true' },
+  },
+  {
+    name: 'hardfork mode',
+    environment: { FAKE_FORGE_HARDFORK_JSON: '"shanghai"' },
+  },
+  {
+    name: 'fork block',
+    environment: { FAKE_FORGE_FORK_BLOCK_NUMBER_JSON: '123' },
+  },
+  {
+    name: 'configured chain ID',
+    environment: { FAKE_FORGE_CHAIN_ID_JSON: '1' },
+  },
+  {
+    name: 'isolated execution mode',
+    environment: { FAKE_FORGE_ISOLATE: 'true' },
+  },
+  {
+    name: 'disabled script execution protection',
+    environment: { FAKE_FORGE_SCRIPT_PROTECTION: 'false' },
+  },
+]) {
+  test(`RECONCILE rejects an effective ${unsafeFoundryPath.name} override before network`, async (context) => {
+    const harness = await createHarness(context);
+    const manifestText = `${JSON.stringify(notDeployedManifest(), null, 2)}\n`;
+    await writeFile(harness.manifestPath, manifestText);
+
+    const failure = await runExpectingFailure(harness.wrapper, {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+      ...unsafeFoundryPath.environment,
+    });
+
+    assert.match(failure.stderr, /Effective Foundry deployment configuration differs/);
+    assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+    assert.equal(await readOptional(harness.castLog), '');
+    assert.equal(await readOptional(harness.forgeLog), '');
+  });
+}
+
+test('RECONCILE accepts legacy auto-detected remappings when their resolved list is reviewed', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+
+  await execFileAsync('/bin/bash', [harness.wrapper], {
+    env: {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+      FAKE_FORGE_AUTO_DETECT_REMAPPINGS: 'true',
+    },
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+  assert.equal(manifest.sourceCommit, sourceCommit);
+  assert.equal(manifest.deploymentScopeDirty, false);
+  assert.match(await readOptional(harness.castLog), /^chain-id$/m);
 });
 
 test('RECONCILE establishes a clean deployment scope from a clean recovered checkout', async (context) => {
@@ -392,41 +660,110 @@ test('RECONCILE establishes a clean deployment scope from a clean recovered chec
   assert.match(await readOptional(harness.forgeLog), /verify-contract/);
 });
 
-test('RECONCILE preserves unknown scope evidence when the recovered checkout is dirty', async (context) => {
+test('RECONCILE can adopt fixed evidence tooling without changing the broadcast source commit', async (context) => {
   const harness = await createHarness(context);
   await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+  const repairedEnvironment = {
+    ...harness.environment,
+    FAKE_SOURCE_COMMIT: toolingCommit,
+  };
 
   await execFileAsync('/bin/bash', [harness.wrapper], {
     env: {
-      ...harness.environment,
+      ...repairedEnvironment,
       RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
       RECONCILE_VERIFICATION_REQUESTED: 'false',
       DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
-      FAKE_DEPLOYMENT_SCOPE_DIRTY: 'true',
     },
     timeout: 15_000,
     maxBuffer: 1024 * 1024,
   });
 
   const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
-  assert.equal(manifest.deploymentScopeDirty, null);
-  assert.equal(manifest.fullTreeDirty, null);
+  assert.equal(manifest.sourceCommit, sourceCommit);
+  assert.equal(manifest.evidenceToolingCommit, toolingCommit);
+  assert.equal(manifest.deploymentScopeDirty, false);
   assert.equal(await readOptional(harness.forgeLog), '');
 
-  await execFileAsync('/bin/bash', [harness.wrapper], {
-    env: {
-      ...harness.environment,
-      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
-      RECONCILE_VERIFICATION_REQUESTED: 'false',
-      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
-    },
-    timeout: 15_000,
-    maxBuffer: 1024 * 1024,
+  await runExpectingFailure(harness.wrapper, {
+    ...repairedEnvironment,
+    VERIFY_GIWA_SEPOLIA_DEPLOY: '91342',
+  });
+  assert.match(await readOptional(harness.forgeLog), /verify-contract/);
+});
+
+test('RECONCILE refuses to replace a committed broadcast artifact digest', async (context) => {
+  const harness = await createHarness(context);
+  const manifestText = await readFile(harness.manifestPath, 'utf8');
+  await writeFile(harness.broadcastPath, '\n', { flag: 'a' });
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
   });
 
-  const reviewedManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
-  assert.equal(reviewedManifest.deploymentScopeDirty, false);
-  assert.equal(reviewedManifest.fullTreeDirty, null);
+  assert.match(failure.stderr, /refuses to replace the committed broadcast artifact SHA-256/);
+  assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('RECONCILE rejects hidden Git index state before network or extraction', async (context) => {
+  const harness = await createHarness(context);
+  const manifestText = `${JSON.stringify(notDeployedManifest(), null, 2)}\n`;
+  await writeFile(harness.manifestPath, manifestText);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
+    DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    FAKE_HIDDEN_INDEX_STATE: 'true',
+  });
+
+  assert.match(failure.stderr, /special Git index state is not allowed/);
+  assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('RECONCILE rejects an ignored untracked source before network or extraction', async (context) => {
+  const harness = await createHarness(context);
+  const manifestText = `${JSON.stringify(notDeployedManifest(), null, 2)}\n`;
+  await writeFile(harness.manifestPath, manifestText);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
+    DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    FAKE_IGNORED_UNTRACKED: 'true',
+  });
+
+  assert.match(failure.stderr, /including an ignored file/);
+  assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('RECONCILE rejects a dirty recovered source scope before network or extraction', async (context) => {
+  const harness = await createHarness(context);
+  const manifestText = `${JSON.stringify(notDeployedManifest(), null, 2)}\n`;
+  await writeFile(harness.manifestPath, manifestText);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
+    DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    FAKE_DEPLOYMENT_SCOPE_DIRTY: 'true',
+  });
+
+  assert.match(failure.stderr, /Broadcast-critical source must exactly match/);
+  assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
 });
 
 for (const invalidSourceEvidence of [
@@ -439,24 +776,22 @@ for (const invalidSourceEvidence of [
     environment: { FAKE_SOURCE_COMMIT_EXISTS: 'false' },
   },
 ]) {
-  test(`RECONCILE preserves unknown scope evidence when ${invalidSourceEvidence.name}`, async (context) => {
+  test(`RECONCILE rejects recovery when ${invalidSourceEvidence.name}`, async (context) => {
     const harness = await createHarness(context);
-    await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+    const manifestText = `${JSON.stringify(notDeployedManifest(), null, 2)}\n`;
+    await writeFile(harness.manifestPath, manifestText);
 
-    await execFileAsync('/bin/bash', [harness.wrapper], {
-      env: {
-        ...harness.environment,
-        RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
-        RECONCILE_VERIFICATION_REQUESTED: 'false',
-        DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
-        ...invalidSourceEvidence.environment,
-      },
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024,
+    const failure = await runExpectingFailure(harness.wrapper, {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+      ...invalidSourceEvidence.environment,
     });
 
-    const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
-    assert.equal(manifest.deploymentScopeDirty, null);
+    assert.match(failure.stderr, /Broadcast-critical source must exactly match/);
+    assert.equal(await readFile(harness.manifestPath, 'utf8'), manifestText);
+    assert.equal(await readOptional(harness.castLog), '');
     assert.equal(await readOptional(harness.forgeLog), '');
   });
 }
@@ -570,7 +905,7 @@ for (const recoveryOperation of [
 }
 
 for (const establishedScopeDirty of [false, true]) {
-  test(`RECONCILE preserves committed ${establishedScopeDirty} scope evidence while source files are dirty`, async (context) => {
+  test(`RECONCILE preserves committed ${establishedScopeDirty} scope evidence from a clean checkout`, async (context) => {
     const harness = await createHarness(context);
     const existingManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
     existingManifest.deploymentScopeDirty = establishedScopeDirty;
@@ -581,7 +916,6 @@ for (const establishedScopeDirty of [false, true]) {
         ...harness.environment,
         RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
         RECONCILE_VERIFICATION_REQUESTED: 'false',
-        FAKE_DEPLOYMENT_SCOPE_DIRTY: 'true',
       },
       timeout: 15_000,
       maxBuffer: 1024 * 1024,
@@ -660,6 +994,7 @@ test('RESUME reaches Forge only for matching broadcast-partial evidence', async 
   assert.match(forgeLog, /--account fixture-account/);
   assert.match(forgeLog, /--broadcast/);
   assert.match(forgeLog, /--resume/);
+  assert.match(forgeLog, /--force/);
   assert.match(forgeLog, /--rpc-url http:\/\/127\.0\.0\.1:1/);
 });
 
@@ -674,16 +1009,44 @@ test('RESUME rejects recorded configuration mismatch before Forge', async (conte
   assert.equal(await readOptional(harness.forgeLog), '');
 });
 
-test('VERIFY rejects a source checkout mismatch before Forge', async (context) => {
+test('VERIFY rejects a source checkout mismatch before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    VERIFY_GIWA_SEPOLIA_DEPLOY: '91342',
+    FAKE_BROADCAST_TREE_MATCHES: 'false',
+  });
+  assert.match(failure.stderr, /Broadcast-critical source must exactly match/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('VERIFY rejects a missing evidence tooling commit before network or Forge', async (context) => {
   const harness = await createHarness(context);
   const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
-  manifest.sourceCommit = 'ffffffffffffffffffffffffffffffffffffffff';
+  delete manifest.evidenceToolingCommit;
   await writeFile(harness.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-  await runExpectingFailure(harness.wrapper, {
+  const failure = await runExpectingFailure(harness.wrapper, {
     ...harness.environment,
     VERIFY_GIWA_SEPOLIA_DEPLOY: '91342',
   });
+  assert.match(failure.stderr, /reviewed evidence tooling SHA/);
+  assert.equal(await readOptional(harness.castLog), '');
+  assert.equal(await readOptional(harness.forgeLog), '');
+});
+
+test('VERIFY rejects an evidence tooling checkout mismatch before network or Forge', async (context) => {
+  const harness = await createHarness(context);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    VERIFY_GIWA_SEPOLIA_DEPLOY: '91342',
+    FAKE_TOOLING_TREE_MATCHES: 'false',
+  });
+  assert.match(failure.stderr, /Deployment and evidence tooling must exactly match/);
+  assert.equal(await readOptional(harness.castLog), '');
   assert.equal(await readOptional(harness.forgeLog), '');
 });
 
