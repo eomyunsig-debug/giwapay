@@ -19,6 +19,7 @@ import process from 'node:process';
 const sha256Pattern = /^[0-9a-f]{64}$/;
 const commitPattern = /^[0-9a-fA-F]{40}$/;
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
+const transactionHashPattern = /^0x[0-9a-fA-F]{64}$/;
 const tokenPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const guardFileName = 'giwapay-deployment-91342-inflight.json';
 const forgeVersion = '1.7.1';
@@ -33,9 +34,11 @@ if (command === 'capture') {
   beginTransition(arguments_);
 } else if (command === 'complete') {
   completeTransition(arguments_);
+} else if (command === 'assert-workspace') {
+  assertWorkspace(arguments_);
 } else {
   throw new Error(
-    'Usage: capture-deployment-transition.mjs begin|capture|validate|complete <command arguments>',
+    'Usage: capture-deployment-transition.mjs begin|capture|validate|complete|assert-workspace <command arguments>',
   );
 }
 
@@ -87,6 +90,7 @@ function beginTransition(argumentsList) {
   assertSafeStorageDirectory(canonicalRoot, canonicalRecoveryCacheDirectory);
   const guardPath = assertGuardPath(guardPathValue);
   const sealedWorkspace = assertPrivateDirectory(sealedWorkspaceValue);
+  const sealedWorkspaceStats = lstatSync(sealedWorkspace, { bigint: true });
   const sealedWorkspaceParent = realpathSync(dirname(sealedWorkspace));
   const sealedWorkspaceName = basename(sealedWorkspace);
   if (
@@ -110,6 +114,8 @@ function beginTransition(argumentsList) {
     sealedWorkspace,
     sealedWorkspaceParent,
     sealedWorkspaceName,
+    sealedWorkspaceDevice: sealedWorkspaceStats.dev.toString(),
+    sealedWorkspaceInode: sealedWorkspaceStats.ino.toString(),
     fullTreeDirty: fullTreeDirtyValue === 'true',
     configuration: readConfigurationFromEnvironment(),
     startedAt: new Date().toISOString(),
@@ -131,7 +137,7 @@ function completeTransition(argumentsList) {
   assertActiveWrapperLock(dirname(guardPath), {
     expectedOperations: ['deploy', 'resume', 'reconcile', 'verify'],
   });
-  const workspace = validateCleanupWorkspace(guard);
+  const workspace = validateGuardWorkspace(guard, { allowMissing: true });
 
   // Once reviewed reconciliation has made this transition closable, the guard
   // is the authoritative signing block. Remove and fsync it before treating the
@@ -191,6 +197,7 @@ function captureTransition(argumentsList) {
   const guardPath = assertGuardPath(guardPathValue);
   const guardBytes = readPrivateFile(guardPath, 'in-flight deployment guard');
   const guard = parseGuard(guardBytes);
+  const guardedWorkspace = validateGuardWorkspace(guard);
   assertActiveWrapperLock(realpathSync(resolve(canonicalContractsRoot)), {
     expectedToken: Number(forgeExitCodeValue) === 255 ? undefined : guard.attemptToken,
     expectedOperations: Number(forgeExitCodeValue) === 255 ? ['reconcile'] : [guard.operation],
@@ -215,10 +222,10 @@ function captureTransition(argumentsList) {
     guard.inputArtifactSha256 !== previousDigest ||
     guard.inputRecoverySidecarSha256 !== previousRecoverySidecarDigest ||
     guard.fullTreeDirty !== (fullTreeDirtyValue === 'true') ||
-    !isPathInside(guard.sealedWorkspace, manifestPath) ||
-    !isPathInside(guard.sealedWorkspace, forgeOutputPath) ||
-    !isPathInside(guard.sealedWorkspace, forgeCachePath) ||
-    !isPathInside(guard.sealedWorkspace, sealedEvidenceDirectory)
+    !isPathInside(guardedWorkspace, manifestPath) ||
+    !isPathInside(guardedWorkspace, forgeOutputPath) ||
+    !isPathInside(guardedWorkspace, forgeCachePath) ||
+    !isPathInside(guardedWorkspace, sealedEvidenceDirectory)
   ) {
     throw new Error('In-flight deployment guard does not bind this sealed transition');
   }
@@ -602,6 +609,8 @@ function validateTransition(argumentsList) {
     journal.inflightGuard?.sha256 !== journalReference.inflightGuardSha256 ||
     digest(reconstructedGuardBytes) !== journalReference.inflightGuardSha256 ||
     !isValidGuardRecord(guard) ||
+    !configurationsEqual(guard.configuration, manifest.configuration) ||
+    guard.fullTreeDirty !== manifest.fullTreeDirty ||
     guard.operation !== journal.operation ||
     guard.sourceCommit !== journal.sourceCommit ||
     guard.signingEvidenceToolingCommit !== journal.signingEvidenceToolingCommit ||
@@ -700,27 +709,169 @@ function validatePrivateCache(bytes, expectedTransactionCount, expectedRpcUrlSha
 }
 
 function assertMonotonicResume(previous, next) {
-  if (JSON.stringify(previous.transactions) !== JSON.stringify(next.transactions)) {
-    throw new Error('Resume changed the ordered transaction payloads');
+  if (previous.transactions.length !== next.transactions.length) {
+    throw new Error('Resume changed the ordered transaction payload count');
   }
+  const previousTransactionHashes = new Set();
+  const nextTransactionHashes = new Set();
+  const newlyAssignedHashes = new Set();
+  const replacedPendingHashes = new Map();
+  for (const [index, previousTransaction] of previous.transactions.entries()) {
+    const nextTransaction = next.transactions[index];
+    if (
+      !isRecord(previousTransaction) ||
+      !isRecord(nextTransaction) ||
+      stableRecord(withoutProgressHash(previousTransaction)) !==
+        stableRecord(withoutProgressHash(nextTransaction))
+    ) {
+      throw new Error('Resume changed the ordered transaction payloads');
+    }
+    const previousHash = optionalTransactionHash(
+      previousTransaction.hash,
+      'pre-resume transaction hash',
+    );
+    const nextHash = optionalTransactionHash(nextTransaction.hash, 'resumed transaction hash');
+    if (previousHash !== null) {
+      if (previousTransactionHashes.has(previousHash)) {
+        throw new Error('Pre-resume sequence duplicated a transaction hash');
+      }
+      previousTransactionHashes.add(previousHash);
+    }
+    if (previousHash !== null && nextHash === null) {
+      throw new Error('Resume removed a previously assigned transaction hash');
+    }
+    if (previousHash !== null && nextHash !== previousHash) {
+      replacedPendingHashes.set(previousHash, nextHash);
+      newlyAssignedHashes.add(nextHash);
+    }
+    if (nextHash !== null) {
+      if (nextTransactionHashes.has(nextHash)) {
+        throw new Error('Resume duplicated a transaction hash');
+      }
+      nextTransactionHashes.add(nextHash);
+      if (previousHash === null) newlyAssignedHashes.add(nextHash);
+    }
+  }
+
   const previousReceipts = Array.isArray(previous.receipts) ? previous.receipts : [];
-  const nextReceiptSet = new Set(
-    (Array.isArray(next.receipts) ? next.receipts : []).map(stableRecord),
-  );
+  const nextReceipts = Array.isArray(next.receipts) ? next.receipts : [];
+  const nextReceiptSet = new Set(nextReceipts.map(stableRecord));
   if (!previousReceipts.every((receipt) => nextReceiptSet.has(stableRecord(receipt)))) {
     throw new Error('Resume removed or changed previously recorded receipts');
   }
-  const previousPendingSet = new Set(
-    (Array.isArray(previous.pending) ? previous.pending : []).map(stableRecord),
+  const previousReceiptHashes = indexedProgressRecords(previousReceipts, 'pre-resume receipt');
+  const nextReceiptHashes = indexedProgressRecords(nextReceipts, 'resumed receipt');
+  const previousPending = indexedProgressRecords(
+    Array.isArray(previous.pending) ? previous.pending : [],
+    'pre-resume pending entry',
   );
   const nextPending = Array.isArray(next.pending) ? next.pending : [];
-  if (!nextPending.every((pending) => previousPendingSet.has(stableRecord(pending)))) {
-    throw new Error('Resume introduced a pending entry outside the reviewed input sequence');
+  const nextPendingByHash = indexedProgressRecords(nextPending, 'resumed pending entry');
+  for (const receiptHash of previousReceiptHashes.keys()) {
+    if (!previousTransactionHashes.has(receiptHash)) {
+      throw new Error('Pre-resume receipt is outside the reviewed transaction sequence');
+    }
+  }
+  for (const pendingHash of previousPending.keys()) {
+    if (!previousTransactionHashes.has(pendingHash)) {
+      throw new Error('Pre-resume pending entry is outside the reviewed transaction sequence');
+    }
+  }
+  for (const [previousHash, replacementHash] of replacedPendingHashes) {
+    if (
+      previousReceiptHashes.has(previousHash) ||
+      nextPendingByHash.has(previousHash) ||
+      nextReceiptHashes.has(previousHash) ||
+      (!nextPendingByHash.has(replacementHash) && !nextReceiptHashes.has(replacementHash))
+    ) {
+      throw new Error(
+        'Resume transaction hash replacement is not a proven dropped-pending transition',
+      );
+    }
+  }
+  for (const receiptHash of nextReceiptHashes.keys()) {
+    if (!nextTransactionHashes.has(receiptHash)) {
+      throw new Error('Resume introduced a receipt outside the reviewed transaction sequence');
+    }
+  }
+  for (const [pendingHash, pendingRecord] of nextPendingByHash) {
+    if (!nextTransactionHashes.has(pendingHash)) {
+      throw new Error('Resume introduced a pending entry outside the reviewed input sequence');
+    }
+    const previousRecord = previousPending.get(pendingHash);
+    const retryingUnconfirmedHash =
+      previousTransactionHashes.has(pendingHash) && !previousReceiptHashes.has(pendingHash);
+    if (
+      previousRecord === undefined &&
+      !newlyAssignedHashes.has(pendingHash) &&
+      !retryingUnconfirmedHash
+    ) {
+      throw new Error('Resume introduced a pending entry outside the reviewed input sequence');
+    }
+    if (previousRecord !== undefined && previousRecord !== pendingRecord) {
+      throw new Error('Resume changed a previously recorded pending entry');
+    }
+  }
+  for (const pendingHash of previousPending.keys()) {
+    if (
+      !nextPendingByHash.has(pendingHash) &&
+      !nextReceiptHashes.has(pendingHash) &&
+      !replacedPendingHashes.has(pendingHash) &&
+      !nextTransactionHashes.has(pendingHash)
+    ) {
+      throw new Error('Resume removed a pending transaction without recording its receipt');
+    }
+  }
+  for (const assignedHash of newlyAssignedHashes) {
+    if (!nextPendingByHash.has(assignedHash) && !nextReceiptHashes.has(assignedHash)) {
+      throw new Error('Resume assigned a transaction hash without pending or receipt evidence');
+    }
   }
 }
 
 function stableRecord(value) {
   return JSON.stringify(value);
+}
+
+function withoutProgressHash(transaction) {
+  return Object.fromEntries(Object.entries(transaction).filter(([key]) => key !== 'hash'));
+}
+
+function optionalTransactionHash(value, label) {
+  if (value === null || value === undefined) return null;
+  if (!transactionHashPattern.test(value)) {
+    throw new Error(`${label} is malformed`);
+  }
+  return value.toLowerCase();
+}
+
+function progressRecordHash(value, label) {
+  const candidate =
+    typeof value === 'string'
+      ? value
+      : isRecord(value)
+        ? (value.transactionHash ?? value.hash)
+        : undefined;
+  if (!transactionHashPattern.test(candidate ?? '')) {
+    throw new Error(`${label} does not identify a transaction hash`);
+  }
+  return candidate.toLowerCase();
+}
+
+function indexedProgressRecords(records, label) {
+  const indexed = new Map();
+  for (const record of records) {
+    const hash = progressRecordHash(record, label);
+    if (indexed.has(hash)) {
+      throw new Error(`${label} duplicated a transaction hash`);
+    }
+    indexed.set(hash, stableRecord(record));
+  }
+  return indexed;
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function parseGuard(bytes) {
@@ -757,6 +908,8 @@ function isValidGuardRecord(guard) {
     typeof guard.sealedWorkspace === 'string' &&
     typeof guard.sealedWorkspaceParent === 'string' &&
     typeof guard.sealedWorkspaceName === 'string' &&
+    /^\d+$/.test(guard.sealedWorkspaceDevice ?? '') &&
+    /^\d+$/.test(guard.sealedWorkspaceInode ?? '') &&
     /^giwapay-reviewed-deploy\.[A-Za-z0-9]+$/.test(guard.sealedWorkspaceName) &&
     resolve(guard.sealedWorkspaceParent, guard.sealedWorkspaceName) === guard.sealedWorkspace &&
     typeof guard.fullTreeDirty === 'boolean' &&
@@ -789,22 +942,28 @@ function readConfigurationFromEnvironment() {
   };
 }
 
+function configurationsEqual(left, right) {
+  if (!isValidConfiguration(left) || !isValidConfiguration(right)) return false;
+  return (
+    JSON.stringify(normalizeConfiguration(left)) === JSON.stringify(normalizeConfiguration(right))
+  );
+}
+
 function assertConfigurationMatchesEnvironment(expected) {
   const actual = readConfigurationFromEnvironment();
-  if (
-    JSON.stringify(normalizeConfiguration(actual)) !==
-    JSON.stringify(normalizeConfiguration(expected))
-  ) {
+  if (!configurationsEqual(actual, expected)) {
     throw new Error('Deployment configuration changed after the in-flight guard was recorded');
   }
 }
 
 function normalizeConfiguration(configuration) {
   return {
-    ...configuration,
     deployerAddress: configuration.deployerAddress.toLowerCase(),
     adapterManagerAddress: configuration.adapterManagerAddress.toLowerCase(),
     platformFeeRecipient: configuration.platformFeeRecipient.toLowerCase(),
+    platformFeeBps: configuration.platformFeeBps,
+    productionMode: configuration.productionMode,
+    deployTestMocks: configuration.deployTestMocks,
   };
 }
 
@@ -900,7 +1059,20 @@ function assertActiveWrapperLock(canonicalRootValue, { expectedToken, expectedOp
   }
 }
 
-function validateCleanupWorkspace(guard) {
+function assertWorkspace(argumentsList) {
+  const [guardPathValue] = argumentsList;
+  if (argumentsList.length !== 1 || !guardPathValue) {
+    throw new Error('Malformed assert-workspace arguments');
+  }
+  const guardPath = assertGuardPath(guardPathValue);
+  const guard = readGuard(guardPath);
+  assertActiveWrapperLock(dirname(guardPath), {
+    expectedOperations: ['reconcile'],
+  });
+  process.stdout.write(validateGuardWorkspace(guard));
+}
+
+function validateGuardWorkspace(guard, { allowMissing = false } = {}) {
   if (
     resolve(guard.sealedWorkspaceParent, guard.sealedWorkspaceName) !== guard.sealedWorkspace ||
     !/^giwapay-reviewed-deploy\.[A-Za-z0-9]+$/.test(guard.sealedWorkspaceName) ||
@@ -908,16 +1080,21 @@ function validateCleanupWorkspace(guard) {
   ) {
     throw new Error('In-flight guard workspace is outside the safe cleanup boundary');
   }
-  if (!existsSync(guard.sealedWorkspace)) return null;
+  if (!existsSync(guard.sealedWorkspace)) {
+    if (allowMissing) return null;
+    throw new Error('In-flight guard workspace is missing from its sealed boundary');
+  }
   const workspace = realpathSync(guard.sealedWorkspace);
-  const workspaceStats = lstatSync(workspace);
+  const workspaceStats = lstatSync(workspace, { bigint: true });
   if (
     workspace !== guard.sealedWorkspace ||
     dirname(workspace) !== guard.sealedWorkspaceParent ||
     basename(workspace) !== guard.sealedWorkspaceName ||
     !workspaceStats.isDirectory() ||
     workspaceStats.isSymbolicLink() ||
-    (workspaceStats.mode & 0o077) !== 0
+    (workspaceStats.mode & 0o077n) !== 0n ||
+    workspaceStats.dev.toString() !== guard.sealedWorkspaceDevice ||
+    workspaceStats.ino.toString() !== guard.sealedWorkspaceInode
   ) {
     throw new Error('In-flight guard workspace is outside the safe cleanup boundary');
   }

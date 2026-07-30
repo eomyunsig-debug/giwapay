@@ -344,6 +344,8 @@ test('begin records an immutable private guard and complete is token-bound', asy
   assert.equal(guard.inputRecoverySidecarSha256, null);
   assert.equal(guard.expectedRpcUrlSha256, rpcUrlSha256);
   assert.equal(guard.sealedWorkspace, fixture.sealedWorkspace);
+  assert.match(guard.sealedWorkspaceDevice, /^\d+$/);
+  assert.match(guard.sealedWorkspaceInode, /^\d+$/);
   assert.equal(guard.fullTreeDirty, true);
   assert.equal((await stat(fixture.guardPath)).mode & 0o777, 0o600);
 
@@ -400,6 +402,36 @@ test('complete rejects a workspace swapped to an outside symlink without removin
   assert.equal((await stat(fixture.guardPath)).isFile(), true);
   assert.equal((await stat(outsideTarget)).isDirectory(), true);
   assert.equal(await readFile(outsideSentinel, 'utf8'), 'keep');
+});
+
+test('capture rejects a workspace swapped to an outside symlink before publishing evidence', async (context) => {
+  const fixture = await createFixture(context, 'capture-symlink');
+  const manifestBytes = await readFile(fixture.manifestPath);
+  const outputBytes = jsonBytes(broadcast());
+  const cacheBytes = jsonBytes(forgeCache());
+  await begin({
+    fixture,
+    token: deployToken,
+    operation: 'deploy',
+  });
+
+  await rm(fixture.sealedWorkspace, { recursive: true });
+  const outsideTarget = join(fixture.root, 'outside-capture-target');
+  await makePrivateDirectory(outsideTarget);
+  await makePrivateDirectory(join(outsideTarget, '.giwapay-evidence'));
+  await writePrivate(join(outsideTarget, 'current.json'), manifestBytes);
+  await writePrivate(join(outsideTarget, 'run-latest.json'), outputBytes);
+  await writePrivate(join(outsideTarget, 'cache-latest.json'), cacheBytes);
+  await symlink(outsideTarget, fixture.sealedWorkspace, 'dir');
+
+  await assert.rejects(
+    capture({ fixture, operation: 'deploy' }),
+    /sealed boundary|safe cleanup boundary/i,
+  );
+  assert.equal((await stat(fixture.guardPath)).isFile(), true);
+  await assert.rejects(stat(join(fixture.broadcastDirectory, `run-${sha256(outputBytes)}.json`)), {
+    code: 'ENOENT',
+  });
 });
 
 for (const invalidCache of [
@@ -574,6 +606,21 @@ test('validate rejects manifest provenance, private sidecar, and journal tamperi
   );
   await writePrivateJson(fixture.manifestPath, authorized);
 
+  const configurationTampered = JSON.parse(JSON.stringify(authorized));
+  configurationTampered.configuration.platformFeeBps = 75;
+  await writePrivateJson(fixture.manifestPath, configurationTampered);
+  await assert.rejects(
+    validate({ fixture, artifactPath, sidecarPath }),
+    /journal|configuration|manifest/i,
+  );
+  await writePrivateJson(fixture.manifestPath, authorized);
+
+  const dirtyStateTampered = JSON.parse(JSON.stringify(authorized));
+  dirtyStateTampered.fullTreeDirty = true;
+  await writePrivateJson(fixture.manifestPath, dirtyStateTampered);
+  await assert.rejects(validate({ fixture, artifactPath, sidecarPath }), /journal|manifest/i);
+  await writePrivateJson(fixture.manifestPath, authorized);
+
   await writePrivate(canonicalSidecarPath, Buffer.from('{"transactions":[]}\n'));
   await assert.rejects(
     validate({ fixture, artifactPath, sidecarPath }),
@@ -648,7 +695,16 @@ test('resume requires the exact prior artifact and sidecar and preserves monoton
   await writePrivateJson(
     fixture.forgeOutputPath,
     broadcast({
-      transactionList: [{ ...transactions[0], hash: `0x${'f'.repeat(64)}` }, transactions[1]],
+      transactionList: [
+        {
+          ...transactions[0],
+          transaction: {
+            ...transactions[0].transaction,
+            data: '0x9999',
+          },
+        },
+        transactions[1],
+      ],
     }),
   );
   await assert.rejects(
@@ -659,6 +715,22 @@ test('resume requires the exact prior artifact and sidecar and preserves monoton
       previousSidecarPath: canonicalSidecarPath,
     }),
     /ordered transaction payloads/i,
+  );
+
+  await writePrivateJson(
+    fixture.forgeOutputPath,
+    broadcast({
+      transactionList: [{ ...transactions[0], hash: `0x${'f'.repeat(64)}` }, transactions[1]],
+    }),
+  );
+  await assert.rejects(
+    capture({
+      fixture,
+      operation: 'resume',
+      previousArtifactPath: canonicalArtifactPath,
+      previousSidecarPath: canonicalSidecarPath,
+    }),
+    /dropped-pending transition/i,
   );
 
   await writePrivateJson(
@@ -754,6 +826,231 @@ test('resume requires the exact prior artifact and sidecar and preserves monoton
     'true',
   );
   await authorizePartialManifest(fixture.manifestPath);
+  assert.equal(
+    (
+      await validate({
+        fixture,
+        artifactPath: resumed.sealedArtifactPath,
+        sidecarPath: resumed.sealedRecoverySidecarPath,
+      })
+    ).stdout,
+    'true',
+  );
+});
+
+test('resume accepts a dropped pending hash replaced by Foundry with bound evidence', async (context) => {
+  const fixture = await createFixture(context, 'resume-replaced-hash');
+  const previousOutputBytes = jsonBytes(
+    broadcast({
+      transactionList: transactions,
+      receipts: [firstReceipt],
+      pending: [transactions[1].hash],
+    }),
+  );
+  const cacheBytes = jsonBytes(forgeCache());
+  const previousArtifactSha256 = sha256(previousOutputBytes);
+  const previousSidecarSha256 = sha256(cacheBytes);
+  const previousArtifactPath = join(
+    fixture.broadcastDirectory,
+    `run-${previousArtifactSha256}.json`,
+  );
+  const previousSidecarPath = join(fixture.cacheDirectory, `run-${previousSidecarSha256}.json`);
+  await writePrivate(previousArtifactPath, previousOutputBytes);
+  await writePrivate(previousSidecarPath, cacheBytes);
+  await begin({
+    fixture,
+    token: resumeToken,
+    operation: 'resume',
+    inputArtifactSha256: previousArtifactSha256,
+    inputSidecarSha256: previousSidecarSha256,
+  });
+  await writePrivate(fixture.forgeCachePath, cacheBytes);
+
+  const replacementHash = `0x${'c'.repeat(64)}`;
+  await writePrivateJson(
+    fixture.forgeOutputPath,
+    broadcast({
+      transactionList: [transactions[0], { ...transactions[1], hash: replacementHash }],
+      receipts: [firstReceipt],
+      pending: [replacementHash],
+    }),
+  );
+  const resumed = JSON.parse(
+    (
+      await capture({
+        fixture,
+        operation: 'resume',
+        previousArtifactPath,
+        previousSidecarPath,
+      })
+    ).stdout,
+  );
+  assert.equal(resumed.changed, true);
+
+  assert.equal(
+    (
+      await validate({
+        fixture,
+        artifactPath: resumed.sealedArtifactPath,
+        sidecarPath: resumed.sealedRecoverySidecarPath,
+      })
+    ).stdout,
+    'true',
+  );
+});
+
+for (const droppedProgression of [
+  {
+    name: 'seals Foundry dropped-pending state when replacement send fails',
+    label: 'resume-dropped-checkpoint',
+    previous: () =>
+      broadcast({
+        transactionList: transactions,
+        receipts: [firstReceipt],
+        pending: [transactions[1].hash],
+      }),
+    next: () =>
+      broadcast({
+        transactionList: transactions,
+        receipts: [firstReceipt],
+        pending: [],
+      }),
+  },
+  {
+    name: 'accepts a later replacement from a reviewed dropped-pending checkpoint',
+    label: 'resume-after-dropped-checkpoint',
+    previous: () =>
+      broadcast({
+        transactionList: transactions,
+        receipts: [firstReceipt],
+        pending: [],
+      }),
+    next: () => {
+      const replacementHash = `0x${'d'.repeat(64)}`;
+      return broadcast({
+        transactionList: [transactions[0], { ...transactions[1], hash: replacementHash }],
+        receipts: [firstReceipt],
+        pending: [replacementHash],
+      });
+    },
+  },
+]) {
+  test(`resume ${droppedProgression.name}`, async (context) => {
+    const fixture = await createFixture(context, droppedProgression.label);
+    const previousOutputBytes = jsonBytes(droppedProgression.previous());
+    const cacheBytes = jsonBytes(forgeCache());
+    const previousArtifactSha256 = sha256(previousOutputBytes);
+    const previousSidecarSha256 = sha256(cacheBytes);
+    const previousArtifactPath = join(
+      fixture.broadcastDirectory,
+      `run-${previousArtifactSha256}.json`,
+    );
+    const previousSidecarPath = join(fixture.cacheDirectory, `run-${previousSidecarSha256}.json`);
+    await writePrivate(previousArtifactPath, previousOutputBytes);
+    await writePrivate(previousSidecarPath, cacheBytes);
+    await begin({
+      fixture,
+      token: resumeToken,
+      operation: 'resume',
+      inputArtifactSha256: previousArtifactSha256,
+      inputSidecarSha256: previousSidecarSha256,
+    });
+    await writePrivate(fixture.forgeCachePath, cacheBytes);
+    await writePrivateJson(fixture.forgeOutputPath, droppedProgression.next());
+
+    const resumed = JSON.parse(
+      (
+        await capture({
+          fixture,
+          operation: 'resume',
+          previousArtifactPath,
+          previousSidecarPath,
+        })
+      ).stdout,
+    );
+    assert.equal(resumed.changed, true);
+    assert.equal(
+      (
+        await validate({
+          fixture,
+          artifactPath: resumed.sealedArtifactPath,
+          sidecarPath: resumed.sealedRecoverySidecarPath,
+        })
+      ).stdout,
+      'true',
+    );
+  });
+}
+
+test('resume accepts Foundry null-to-pending transaction hash progression with bound evidence', async (context) => {
+  const fixture = await createFixture(context, 'resume-new-hash');
+  const previousOutputBytes = jsonBytes(
+    broadcast({
+      transactionList: [transactions[0], { ...transactions[1], hash: null }],
+      receipts: [firstReceipt],
+      pending: [],
+    }),
+  );
+  const cacheBytes = jsonBytes(forgeCache());
+  const previousArtifactSha256 = sha256(previousOutputBytes);
+  const previousSidecarSha256 = sha256(cacheBytes);
+  const previousArtifactPath = join(
+    fixture.broadcastDirectory,
+    `run-${previousArtifactSha256}.json`,
+  );
+  const previousSidecarPath = join(fixture.cacheDirectory, `run-${previousSidecarSha256}.json`);
+  await writePrivate(previousArtifactPath, previousOutputBytes);
+  await writePrivate(previousSidecarPath, cacheBytes);
+  await begin({
+    fixture,
+    token: resumeToken,
+    operation: 'resume',
+    inputArtifactSha256: previousArtifactSha256,
+    inputSidecarSha256: previousSidecarSha256,
+  });
+  await writePrivate(fixture.forgeCachePath, cacheBytes);
+
+  await writePrivateJson(
+    fixture.forgeOutputPath,
+    broadcast({
+      transactionList: transactions,
+      receipts: [firstReceipt],
+      pending: [],
+    }),
+  );
+  await assert.rejects(
+    capture({
+      fixture,
+      operation: 'resume',
+      previousArtifactPath,
+      previousSidecarPath,
+    }),
+    /without pending or receipt evidence/i,
+  );
+
+  await writePrivateJson(
+    fixture.forgeOutputPath,
+    broadcast({
+      transactionList: transactions,
+      receipts: [firstReceipt],
+      pending: [transactions[1].hash],
+    }),
+  );
+  const resumed = JSON.parse(
+    (
+      await capture({
+        fixture,
+        operation: 'resume',
+        previousArtifactPath,
+        previousSidecarPath,
+      })
+    ).stdout,
+  );
+  assert.equal(resumed.changed, true);
+
+  const manifest = await readJson(fixture.manifestPath);
+  assert.equal(manifest.deploymentStatus, 'broadcast-transition');
+  assert.equal(manifest.broadcastArtifact.resumeAuthorized, false);
   assert.equal(
     (
       await validate({

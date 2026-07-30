@@ -189,6 +189,12 @@ directory; do not delete it manually. Separate clones or machines do not share
 that lock, so the same deployer account must still have one explicitly
 serialized operator lane.
 
+The guard also records the sealed workspace's canonical parent, name,
+filesystem device, and inode. Capture, interrupted recovery, and cleanup all
+revalidate that identity and its private real-directory mode before using it.
+A symlink or replacement-directory swap is rejected before reconciliation can
+stage a manifest or publish evidence.
+
 Every wrapper invocation also holds a private
 `giwapay-deployment.lock` owner file in that shared Git directory. The complete
 owner record is written and fsynced under a unique name, then hard-linked into
@@ -249,6 +255,8 @@ If an attempt reached Forge, do not run a new deployment command:
    produced the broadcast.
    Reconciliation validates the guard, transition journal, content-addressed
    public sequence, private sidecar, exact Forge schema, and current RPC digest.
+   It also requires the six signing-time role/fee/mode values and
+   `fullTreeDirty` state embedded in the guard to match the committed manifest.
    It may then close the matching guard. A partial result becomes
    `resumeAuthorized=true`; a complete result remains non-resumable. Review and
    commit the refreshed `current.json` before any resume or standalone
@@ -277,6 +285,19 @@ If an attempt reached Forge, do not run a new deployment command:
    match the current reviewed endpoint; stages both exact files into the
    isolated Forge paths; and rejects any network, source, evidence-tooling,
    deployer, role, fee, production, or mock-mode mismatch.
+   Foundry may legitimately advance a previously unsent transaction's public
+   `hash` from `null` to its sent hash during resume. The evidence helper permits
+   only that forward transition, requires the new hash to appear in `pending` or
+   a receipt, and rejects payload changes, receipt rollback, or unexplained
+   pending removal. Foundry may also replace the hash of a transaction that the
+   prior sequence marked pending but the RPC later dropped; that replacement is
+   accepted only when the old hash disappears without a receipt and the same
+   transaction index records a new hash backed by new pending or receipt
+   evidence. If the RPC drops the old pending transaction and the replacement
+   send itself fails, the helper may seal the intermediate state only with the
+   unchanged transaction hash and no pending or receipt entry. That reviewed
+   state can later advance to a same-payload replacement under the same evidence
+   rules.
 4. If the broadcast is complete but verification failed, do not resume or
    redeploy. Commit the reviewed complete manifest, keep the deployment source
    tree and evidence tooling identical to their separately recorded commits,

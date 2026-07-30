@@ -1007,6 +1007,12 @@ if [[ "$operation" == "reconcile" && "$inflight_guard_present" == "true" ]]; the
     node -e 'process.stdout.write(JSON.parse(process.argv[1]).sealedWorkspace)' \
       "$preserved_guard_metadata"
   )"
+  if [[ "$preserved_output_state" == "complete" ]]; then
+    node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+      assert-workspace \
+      "$inflight_guard_path" >/dev/null ||
+      fail "The guarded Forge workspace is outside its original private recovery boundary."
+  fi
   preserved_full_tree_dirty="$(
     node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).fullTreeDirty))' \
       "$preserved_guard_metadata"

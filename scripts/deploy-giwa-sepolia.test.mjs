@@ -4,12 +4,15 @@ import { createHash } from 'node:crypto';
 import {
   chmod,
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   stat,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -612,6 +615,80 @@ async function readOptional(path) {
   }
 }
 
+async function prepareInterruptedDeployHarness(harness, { swapWorkspaceToSymlink = false } = {}) {
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+  await rm(harness.broadcastPath);
+
+  const sealedWorkspaceParent = await realpath(join(harness.root, 'tmp'));
+  const sealedWorkspace = join(sealedWorkspaceParent, 'giwapay-reviewed-deploy.interrupted');
+  let outputWorkspace = sealedWorkspace;
+  const interruptedBroadcastDirectory = join(
+    outputWorkspace,
+    'packages',
+    'contracts',
+    'broadcast',
+    'DeployGiwaSepolia.s.sol',
+    '91342',
+  );
+  const interruptedCacheDirectory = join(
+    outputWorkspace,
+    'packages',
+    'contracts',
+    'cache',
+    'DeployGiwaSepolia.s.sol',
+    '91342',
+  );
+  await mkdir(interruptedBroadcastDirectory, { recursive: true, mode: 0o700 });
+  await mkdir(interruptedCacheDirectory, { recursive: true, mode: 0o700 });
+  await chmod(outputWorkspace, 0o700);
+  const interruptedBroadcastPath = join(interruptedBroadcastDirectory, 'run-latest.json');
+  const interruptedCachePath = join(interruptedCacheDirectory, 'run-latest.json');
+  await Promise.all([
+    copyFile(harness.forgeBroadcastFixture, interruptedBroadcastPath),
+    copyFile(harness.forgeCacheFixture, interruptedCachePath),
+  ]);
+  await Promise.all([chmod(interruptedBroadcastPath, 0o600), chmod(interruptedCachePath, 0o600)]);
+  const sealedWorkspaceStats = await lstat(sealedWorkspace, { bigint: true });
+  if (swapWorkspaceToSymlink) {
+    outputWorkspace = join(harness.root, 'outside-interrupted-workspace');
+    await rename(sealedWorkspace, outputWorkspace);
+    await symlink(outputWorkspace, sealedWorkspace, 'dir');
+  }
+
+  const guardPath = join(harness.root, '.git', 'giwapay-deployment-91342-inflight.json');
+  const guard = {
+    schemaVersion: 1,
+    project: 'GiwaPay',
+    chainId: 91342,
+    attemptToken: '11111111-1111-4111-8111-111111111111',
+    operation: 'deploy',
+    sourceCommit,
+    signingEvidenceToolingCommit: sourceCommit,
+    inputArtifactSha256: null,
+    inputRecoverySidecarSha256: null,
+    expectedRpcUrlSha256: harness.rpcUrlSha256,
+    sealedWorkspace,
+    sealedWorkspaceParent,
+    sealedWorkspaceName: basename(sealedWorkspace),
+    sealedWorkspaceDevice: sealedWorkspaceStats.dev.toString(),
+    sealedWorkspaceInode: sealedWorkspaceStats.ino.toString(),
+    fullTreeDirty: false,
+    configuration: {
+      deployerAddress: deployer,
+      adapterManagerAddress: adapterManager,
+      platformFeeRecipient: feeRecipient,
+      platformFeeBps: 50,
+      productionMode: true,
+      deployTestMocks: false,
+    },
+    startedAt: '2026-07-30T00:00:00.000Z',
+  };
+  await writeFile(guardPath, `${JSON.stringify(guard, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  return { guardPath, outputWorkspace, sealedWorkspace };
+}
+
 for (const invalidPlaceholder of [
   {
     name: 'missing',
@@ -778,67 +855,7 @@ test('RECONCILE recovers interrupted sealed Forge output before a second review-
   const harness = await createHarness(context, {
     useRealTransitionHelper: true,
   });
-  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
-  await rm(harness.broadcastPath);
-
-  const sealedWorkspaceParent = await realpath(join(harness.root, 'tmp'));
-  const sealedWorkspace = join(sealedWorkspaceParent, 'giwapay-reviewed-deploy.interrupted');
-  const interruptedBroadcastDirectory = join(
-    sealedWorkspace,
-    'packages',
-    'contracts',
-    'broadcast',
-    'DeployGiwaSepolia.s.sol',
-    '91342',
-  );
-  const interruptedCacheDirectory = join(
-    sealedWorkspace,
-    'packages',
-    'contracts',
-    'cache',
-    'DeployGiwaSepolia.s.sol',
-    '91342',
-  );
-  await mkdir(interruptedBroadcastDirectory, { recursive: true, mode: 0o700 });
-  await mkdir(interruptedCacheDirectory, { recursive: true, mode: 0o700 });
-  await chmod(sealedWorkspace, 0o700);
-  const interruptedBroadcastPath = join(interruptedBroadcastDirectory, 'run-latest.json');
-  const interruptedCachePath = join(interruptedCacheDirectory, 'run-latest.json');
-  await Promise.all([
-    copyFile(harness.forgeBroadcastFixture, interruptedBroadcastPath),
-    copyFile(harness.forgeCacheFixture, interruptedCachePath),
-  ]);
-  await Promise.all([chmod(interruptedBroadcastPath, 0o600), chmod(interruptedCachePath, 0o600)]);
-
-  const guardPath = join(harness.root, '.git', 'giwapay-deployment-91342-inflight.json');
-  const guard = {
-    schemaVersion: 1,
-    project: 'GiwaPay',
-    chainId: 91342,
-    attemptToken: '11111111-1111-4111-8111-111111111111',
-    operation: 'deploy',
-    sourceCommit,
-    signingEvidenceToolingCommit: sourceCommit,
-    inputArtifactSha256: null,
-    inputRecoverySidecarSha256: null,
-    expectedRpcUrlSha256: harness.rpcUrlSha256,
-    sealedWorkspace,
-    sealedWorkspaceParent,
-    sealedWorkspaceName: basename(sealedWorkspace),
-    fullTreeDirty: false,
-    configuration: {
-      deployerAddress: deployer,
-      adapterManagerAddress: adapterManager,
-      platformFeeRecipient: feeRecipient,
-      platformFeeBps: 50,
-      productionMode: true,
-      deployTestMocks: false,
-    },
-    startedAt: '2026-07-30T00:00:00.000Z',
-  };
-  await writeFile(guardPath, `${JSON.stringify(guard, null, 2)}\n`, {
-    mode: 0o600,
-  });
+  const { guardPath, sealedWorkspace } = await prepareInterruptedDeployHarness(harness);
 
   const forgeLogBeforeRecovery = await readOptional(harness.forgeLog);
   const firstRecovery = await execFileAsync('/bin/bash', [harness.wrapper], {
@@ -881,6 +898,34 @@ test('RECONCILE recovers interrupted sealed Forge output before a second review-
   assert.equal(await readOptional(harness.forgeLog), forgeLogBeforeRecovery);
   await assert.rejects(stat(guardPath), { code: 'ENOENT' });
   await assert.rejects(stat(sealedWorkspace), { code: 'ENOENT' });
+});
+
+test('RECONCILE rejects an interrupted workspace symlink swap before staging evidence', async (context) => {
+  const harness = await createHarness(context, {
+    useRealTransitionHelper: true,
+  });
+  const { guardPath, outputWorkspace, sealedWorkspace } = await prepareInterruptedDeployHarness(
+    harness,
+    {
+      swapWorkspaceToSymlink: true,
+    },
+  );
+  const manifestBefore = await readFile(harness.manifestPath);
+
+  const failure = await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+    RECONCILE_VERIFICATION_REQUESTED: 'false',
+    DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+  });
+
+  assert.match(failure.stderr, /original private recovery boundary/i);
+  assert.deepEqual(await readFile(harness.manifestPath), manifestBefore);
+  assert.equal((await stat(guardPath)).isFile(), true);
+  assert.equal((await lstat(sealedWorkspace)).isSymbolicLink(), true);
+  assert.equal((await stat(outputWorkspace)).isDirectory(), true);
+  await assert.rejects(stat(join(outputWorkspace, '.giwapay-evidence')), { code: 'ENOENT' });
+  assert.equal(await readOptional(harness.forgeLog), '');
 });
 
 test('RESUME stages both sealed inputs, records a non-authorized monotonic transition, and RECONCILE closes its guard', async (context) => {
