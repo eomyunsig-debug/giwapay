@@ -28,9 +28,9 @@ Sources:
   <https://giwapay-mvp.eomyunsig.chatgpt.site>
 - Source: <https://github.com/eomyunsig-debug/giwapay>
 - Public pitch deck:
-  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf>
+  <https://github.com/eomyunsig-debug/giwapay/blob/e17ca73ec46033636c3b98b000075334116a8b7f/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf>
 - Public technical one-pager:
-  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/gasok-one-pager.md>
+  <https://github.com/eomyunsig-debug/giwapay/blob/e17ca73ec46033636c3b98b000075334116a8b7f/docs/gasok-one-pager.md>
 - Judge evidence path:
   <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/gasok-judge-evidence.md>
 - Hardening-merge CI baseline on `main`:
@@ -44,10 +44,9 @@ Sources:
 - Public team introduction: **`[required before submission]`**
 - Submission receipt: **`[record after submission]`**
 
-Replace the pitch-deck and one-pager `main` links above with their public
-immutable artifact-commit links after the final artifacts are committed. Record
-the final reviewed deployment source commit and its successful CI run before
-submission.
+The pitch-deck and one-pager links above are pinned to the immutable artifact
+commit. Record the final reviewed deployment source commit and its successful
+CI run before submission.
 
 ## Provisional form map — verify in the live form
 
@@ -57,20 +56,20 @@ notes, **not a confirmed statement of the current questions, required/optional
 status, limits, consent wording, or track-selection mechanics**. Check the live
 form before copying any answer and follow its current labels and limits.
 
-| Working # | Provisional field               | Draft submission value                                                                            |
-| --------: | ------------------------------- | ------------------------------------------------------------------------------------------------- |
-|         1 | Team name                       | `GiwaPay`                                                                                         |
-|         2 | Contact email                   | `[applicant required if requested]`                                                               |
-|         3 | Public team introduction        | `[applicant identity and career details required if requested]`                                   |
-|         4 | Motivation                      | Use **Motivation** below, shortened to the live limit                                             |
-|         5 | Track                           | **Mass Adoption** as the primary editorial choice                                                 |
-|         6 | One-line project summary        | Use **One line** below, shortened if needed                                                       |
-|         7 | Public pitch-deck link          | <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf>    |
-|         8 | Working MVP or demo-video URL   | **`[PENDING — provide a truthful executable-flow demo if the live form requests this evidence]`** |
-|         9 | Verified GIWA testnet contract  | `[GIWA Explorer verified contract URL required if requested]`                                     |
-|        10 | Technical document or one-pager | <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/gasok-one-pager.md>                    |
-|        11 | Additional support              | Use **Additional support** below if the live form requests it                                     |
-|        12 | Message to the GIWA team        | Use **Message to GIWA** below if the live form requests it                                        |
+| Working # | Provisional field               | Draft submission value                                                                                                             |
+| --------: | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+|         1 | Team name                       | `GiwaPay`                                                                                                                          |
+|         2 | Contact email                   | `[applicant required if requested]`                                                                                                |
+|         3 | Public team introduction        | `[applicant identity and career details required if requested]`                                                                    |
+|         4 | Motivation                      | Use **Motivation** below, shortened to the live limit                                                                              |
+|         5 | Track                           | **Mass Adoption** as the primary editorial choice                                                                                  |
+|         6 | One-line project summary        | Use **One line** below, shortened if needed                                                                                        |
+|         7 | Public pitch-deck link          | <https://github.com/eomyunsig-debug/giwapay/blob/e17ca73ec46033636c3b98b000075334116a8b7f/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf> |
+|         8 | Working MVP or demo-video URL   | **`[PENDING — provide a truthful executable-flow demo if the live form requests this evidence]`**                                  |
+|         9 | Verified GIWA testnet contract  | `[GIWA Explorer verified contract URL required if requested]`                                                                      |
+|        10 | Technical document or one-pager | <https://github.com/eomyunsig-debug/giwapay/blob/e17ca73ec46033636c3b98b000075334116a8b7f/docs/gasok-one-pager.md>                 |
+|        11 | Additional support              | Use **Additional support** below if the live form requests it                                                                      |
+|        12 | Message to the GIWA team        | Use **Message to GIWA** below if the live form requests it                                                                         |
 
 The applicant must personally review the exact live consent language and decide
 whether to accept it. Independently of the form wording, keep the MVP, video,
@@ -298,8 +297,7 @@ Use this table to keep the application and demo accurate.
 - [ ] Deploy to GIWA Sepolia and verify at least one submitted contract in GIWA
       Explorer. Do not paste an unverified address.
 - [x] Prepare the public pitch deck and editable source.
-- [ ] Replace the pitch-deck and one-pager links with the final immutable
-      artifact-commit URLs.
+- [x] Pin the pitch-deck and one-pager links to the immutable artifact commit.
 - [ ] Record and upload a truthful executable-flow demo if the live form asks
       for working MVP or demo evidence; add only the actual URL.
 - [ ] Use the merged `main` commit and the successful post-merge CI link.

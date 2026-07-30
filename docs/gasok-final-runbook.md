@@ -67,9 +67,11 @@ repository homepage, or unverified explorer page.
 ## Evidence record
 
 - Source commit: **`[pending]`**
-- Public deck: **`[pending final immutable artifact-commit URL]`**
+- Public deck:
+  <https://github.com/eomyunsig-debug/giwapay/blob/e17ca73ec46033636c3b98b000075334116a8b7f/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf>
 - Public team introduction: **`[pending]`**
-- Public one-pager: **`[pending final immutable artifact-commit URL]`**
+- Public one-pager:
+  <https://github.com/eomyunsig-debug/giwapay/blob/e17ca73ec46033636c3b98b000075334116a8b7f/docs/gasok-one-pager.md>
 - Executable-flow MVP or demo: **`[pending]`**
 - Supplemental non-transactional showcase:
   <https://giwapay-mvp.eomyunsig.chatgpt.site>
