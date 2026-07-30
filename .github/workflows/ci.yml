@@ -288,3 +288,79 @@ jobs:
 
       - name: Run browser tests
         run: pnpm test:e2e
+
+  wallet-e2e-video:
+    name: Local GIWA wallet E2E video
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    needs: verify
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Set up Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @giwapay/web exec playwright install --with-deps chromium
+
+      - name: Start isolated local GIWA demo
+        run: pnpm demo:up
+
+      - name: Gate local chain, API, web, and indexer
+        shell: bash
+        run: |
+          test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 91342
+          for attempt in {1..60}; do
+            curl --fail --silent http://127.0.0.1:3001/ready > /dev/null && break
+            test "$attempt" -lt 60 || exit 1
+            sleep 1
+          done
+          for attempt in {1..60}; do
+            curl --fail --silent http://127.0.0.1:3000 > /dev/null && break
+            test "$attempt" -lt 60 || exit 1
+            sleep 1
+          done
+          docker compose --env-file .env.demo -f docker-compose.yml \
+            ps --status running --services | grep -Fx indexer
+
+      - name: Prepare public local-only payment fixture
+        run: node scripts/prepare-wallet-e2e.mjs "$RUNNER_TEMP/giwapay-wallet-e2e.json"
+
+      - name: Record verified wallet payment
+        env:
+          GIWAPAY_WALLET_E2E_STATE: ${{ runner.temp }}/giwapay-wallet-e2e.json
+        run: pnpm --filter @giwapay/web test:e2e:anvil-wallet
+
+      - name: Remove demo containers and ephemeral configuration
+        if: always()
+        run: pnpm demo:down
+
+      - name: Upload wallet payment video only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: giwapay-local-wallet-e2e-video-${{ github.sha }}-${{ github.run_attempt }}
+          path: apps/web/test-results/wallet-e2e/**/video.webm
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0

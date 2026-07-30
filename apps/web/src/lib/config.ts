@@ -54,6 +54,8 @@ export const getConfiguredToken = (address: string) =>
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3001';
 
 const configuredExplorer = process.env.NEXT_PUBLIC_GIWA_EXPLORER_URL;
+export const IS_LOCAL_ANVIL_DEMO =
+  allowTestContracts && configuredExplorer !== undefined && configuredExplorer.trim().length === 0;
 export const GIWA_EXPLORER_URL =
   configuredExplorer === undefined
     ? GIWA_SEPOLIA_EXPLORER_URL

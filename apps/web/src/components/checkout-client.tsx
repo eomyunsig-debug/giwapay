@@ -20,7 +20,7 @@ import { GIWA_SEPOLIA_CHAIN_ID } from '@giwapay/chains';
 import { erc20ApprovalAbi, type PaymentQuote } from '@giwapay/sdk';
 import { Button, Card, DefinitionRow, Divider } from '@giwapay/ui';
 import { giwaPayClient } from '@/lib/api';
-import { getConfiguredToken, transactionExplorerUrl } from '@/lib/config';
+import { getConfiguredToken, IS_LOCAL_ANVIL_DEMO, transactionExplorerUrl } from '@/lib/config';
 import {
   formatBasisPoints,
   formatDateTime,
@@ -585,10 +585,10 @@ function CheckoutFrame({ children }: { children: React.ReactNode }) {
   return (
     <main className="checkout-page" id="main-content">
       <header className="checkout-header">
-        <Brand />
+        <Brand network={IS_LOCAL_ANVIL_DEMO ? 'Anvil' : 'Sepolia'} />
         <div className="header-actions">
           <span className="secure-label">
-            <Clock3 size={12} /> GIWA Sepolia
+            <Clock3 size={12} /> {IS_LOCAL_ANVIL_DEMO ? 'Local Anvil · 91342' : 'GIWA Sepolia'}
           </span>
           <LanguageToggle />
         </div>
