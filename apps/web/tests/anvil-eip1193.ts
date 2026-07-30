@@ -319,6 +319,7 @@ export async function installAnvilEip1193Wallet(
         throw new Error('Disposable Anvil RPC binding was not installed');
       }
 
+      let authorized = false;
       const provider = {
         request: async ({ method, params }: RequestArguments): Promise<unknown> => {
           const arrayParams = requireParamsArray(params);
@@ -328,8 +329,9 @@ export async function installAnvilEip1193Wallet(
             case 'net_version':
               return String(chainId);
             case 'eth_accounts':
-              return [selectedAccount];
+              return authorized ? [selectedAccount] : [];
             case 'eth_requestAccounts':
+              authorized = true;
               emit('accountsChanged', [selectedAccount]);
               return [selectedAccount];
             case 'wallet_switchEthereumChain':

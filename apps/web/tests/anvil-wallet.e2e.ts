@@ -297,11 +297,8 @@ test('records one real local wallet payment through canonical indexer verificati
   await expect(maximumInput.locator('dd')).toHaveText('101.505 MockKRW');
   await paceVideo(page);
 
-  await page.getByRole('button', { name: 'Connect wallet' }).click();
-  await page
-    .getByRole('button', { name: /GiwaPay Anvil test wallet|Injected/i })
-    .first()
-    .click();
+  await page.getByRole('button', { name: 'Connect wallet', exact: true }).click();
+  await page.getByRole('button', { name: 'GiwaPay Anvil test wallet', exact: true }).click();
   await expect(page.locator('.wallet-pill')).toBeVisible();
   await page.locator('.wallet-pill').click();
   await expect(page.locator('.wallet-address')).toHaveText(getAddress(state.payerAddress));
