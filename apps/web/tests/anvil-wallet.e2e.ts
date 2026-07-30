@@ -310,6 +310,8 @@ test('records one real local wallet payment through canonical indexer verificati
   await expect(
     page.getByText('Testnet demo · Mock tokens have no monetary value.', { exact: true }),
   ).toBeVisible();
+  await expect(page.getByText('Anvil', { exact: true })).toBeVisible();
+  await expect(page.getByText('Local Anvil · 91342', { exact: true })).toBeVisible();
   await expect(page.getByText('100 MockKRW', { exact: true })).toBeVisible();
 
   const maximumInput = page
@@ -402,6 +404,7 @@ test('records one real local wallet payment through canonical indexer verificati
   await expect(page).toHaveURL(`${state.webBaseUrl}/receipt/${encodeURIComponent(state.intentId)}`);
 
   await expect(page.getByRole('heading', { name: 'Payment verified' })).toBeVisible();
+  await expect(page.getByText('Local Anvil receipt', { exact: true })).toBeVisible();
   await expect(page.getByText('Paid', { exact: true })).toBeVisible();
   const settlement = page
     .locator('.gp-definition-row')
