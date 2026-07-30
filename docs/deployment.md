@@ -212,10 +212,13 @@ If an attempt reached Forge, do not run a new deployment command:
    sequence, its receipts, the deployer nonce, and explorer transactions.
    Treat the matching private cache sequence as a secret. If the process died
    before durable capture, reconciliation can import both exact files from the
-   guarded sealed workspace; it does not sign. If an older cleanup crash removed
-   that disposable workspace after the exact guard/journal/artifact/sidecar
-   transition was already committed, reconciliation can validate the
-   content-addressed copies and close the matching guard without the workspace.
+   guarded sealed workspace; it does not sign. That first recovery publishes a
+   non-resumable transition and intentionally preserves the guard and workspace;
+   review and commit the manifest, then run reconciliation a second time to
+   close them. If an older cleanup crash removed that disposable workspace after
+   the exact guard/journal/artifact/sidecar transition was already committed,
+   reconciliation can validate the content-addressed copies and close the
+   matching guard without the workspace.
    If neither a complete guarded output pair nor that committed transition
    exists, the wrapper remains fail-closed and requires an explicit deployer
    nonce and receipt audit; it never invents evidence or authorizes a retry.
