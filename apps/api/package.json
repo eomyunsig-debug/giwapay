@@ -9,10 +9,14 @@
     "dev:server": "tsx watch src/server.ts",
     "dev:indexer": "tsx watch src/indexer.ts",
     "dev:webhooks": "tsx watch src/webhook-worker.ts",
+    "dev:retention": "tsx watch src/retention-worker.ts",
     "start": "node dist/server.js",
     "start:server": "node dist/server.js",
     "start:indexer": "node dist/indexer.js",
     "start:webhooks": "node dist/webhook-worker.js",
+    "start:retention": "node dist/retention-worker.js",
+    "signer:provision": "tsx src/provision-signer-key.ts",
+    "signer:provision:built": "node dist/provision-signer-key.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -20,6 +24,7 @@
     "test:integration": "vitest run src/auth.integration.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "3.1096.0",
     "@fastify/cookie": "11.1.2",
     "@fastify/cors": "11.3.0",
     "@fastify/helmet": "13.1.0",

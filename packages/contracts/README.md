@@ -66,6 +66,7 @@ Exact struct type:
 PaymentIntent(
   bytes32 intentId,
   address merchant,
+  address signer,
   address settlementToken,
   uint256 settlementAmount,
   bytes32 splitId,
@@ -80,9 +81,11 @@ PaymentIntent(
 
 `intentId` is single-use within the merchant namespace: replay state and
 payment records are keyed by `(merchant, intentId)`. `payer` may be zero to
-allow any payer, otherwise it must equal the transaction sender. The current
-delegated signer in `MerchantRegistry` must recover from the signature at
-execution time, so signer rotation/revocation invalidates pending signatures.
+allow any payer, otherwise it must equal the transaction sender. The signed
+`signer` must be the current delegated signer in `MerchantRegistry`.
+`SignatureChecker` validates either an EOA signature or an ERC-1271
+contract-wallet signature at execution time, so signer rotation/revocation
+invalidates pending signatures.
 
 The platform fee is not discretionary invoice data. It must equal:
 

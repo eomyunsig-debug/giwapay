@@ -1,25 +1,21 @@
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
+
+import { LanguageToggle } from './language-toggle';
 
 export const metadata: Metadata = {
   title: 'GiwaPay — Public Testnet MVP Showcase',
-  description: 'GiwaPay의 제품 흐름, 보안 경계, 오픈소스 구현과 검증 범위를 확인하세요.',
+  description: 'GiwaPay의 핵심 결제 경험과 검증 가능한 테스트넷 구현을 확인하세요.',
 };
 
 const github = 'https://github.com/eomyunsig-debug/giwapay';
 
-function ArrowIcon() {
+function Bilingual({ en, ko }: { en: ReactNode; ko: ReactNode }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="M4 10h11M11 5l5 5-5 5" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="m4 10 4 4 8-8" />
-    </svg>
+    <>
+      <span className="copy-en">{en}</span>
+      <span className="copy-ko">{ko}</span>
+    </>
   );
 }
 
@@ -27,249 +23,302 @@ export default function Home() {
   return (
     <div className="site-shell">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="GiwaPay home">
+        <a className="brand" href="#top" aria-label="GiwaPay home / GiwaPay 홈">
           <span className="brand-mark" aria-hidden="true">
             G
           </span>
           <span>GiwaPay</span>
         </a>
-        <nav aria-label="주요 탐색">
-          <a href="#flow">Flow</a>
-          <a href="#proof">Proof</a>
-          <a href="#boundaries">Boundaries</a>
-        </nav>
-        <a className="source-link" href={github} target="_blank" rel="noreferrer">
-          View source
-          <ArrowIcon />
-        </a>
+        <div className="topbar-actions">
+          <LanguageToggle />
+          <a className="source-link" href={github} target="_blank" rel="noreferrer">
+            <Bilingual en="View source" ko="소스 보기" />
+          </a>
+        </div>
       </header>
 
       <main id="top">
-        <section className="hero">
+        <section className="hero" aria-labelledby="hero-title">
           <div className="hero-copy">
-            <div className="status-pill">
+            <p className="status-pill">
               <span aria-hidden="true" />
-              Public showcase · Testnet MVP
-            </div>
-            <h1>
-              Pay with anything.
-              <br />
-              Settle <em>exactly.</em>
-            </h1>
-            <p className="hero-korean">
-              사용자는 가진 자산으로 결제하고, 판매자는 선택한 자산과 정확한 금액으로 정산받는 GIWA
-              기반 비수탁 결제 레이어.
+              <Bilingual en="GIWA Sepolia · Testnet MVP" ko="GIWA Sepolia · 테스트넷 MVP" />
             </p>
-            <p className="hero-detail">
-              GiwaPay binds the settlement token, exact amount, recipient split, fee, and expiry
-              into a merchant-signed intent—then settles atomically on-chain.
+            <h1 id="hero-title">
+              <Bilingual
+                en={
+                  <>
+                    Pay with anything.
+                    <br />
+                    Settle <em>exactly.</em>
+                  </>
+                }
+                ko={
+                  <>
+                    결제는 자유롭게.
+                    <br />
+                    정산은 <em>정확하게.</em>
+                  </>
+                }
+              />
+            </h1>
+            <p className="hero-lede">
+              <Bilingual
+                en="Customers pay with a supported asset. Merchants receive the exact token and amount they chose."
+                ko="고객은 지원 자산으로 결제하고, 판매자는 선택한 자산과 정확한 금액을 받습니다."
+              />
             </p>
             <div className="hero-actions">
               <a className="button button-primary" href={github} target="_blank" rel="noreferrer">
-                Explore the repository
-                <ArrowIcon />
+                <Bilingual en="Explore the repository" ko="저장소 살펴보기" />
               </a>
               <a
                 className="button button-secondary"
-                href={`${github}/blob/main/docs/architecture.md`}
+                href={`${github}/blob/main/docs/testing.md`}
+                target="_blank"
+                rel="noreferrer"
               >
-                Read architecture
+                <Bilingual en="See verification" ko="검증 내용 보기" />
               </a>
             </div>
-            <p className="release-note">
-              <strong>Scope notice:</strong> public product showcase only. Live GIWA Sepolia
-              contracts and payment execution are not deployed yet.
+            <p className="scope-notice">
+              <Bilingual
+                en={
+                  <>
+                    <strong>Testnet demo.</strong> Public showcase only. Live GIWA Sepolia contracts
+                    and payment execution are not deployed yet.
+                  </>
+                }
+                ko={
+                  <>
+                    <strong>테스트넷 데모.</strong> 공개 쇼케이스 전용입니다. GIWA Sepolia
+                    컨트랙트와 실제 결제 실행 환경은 아직 배포되지 않았습니다.
+                  </>
+                }
+              />
             </p>
           </div>
 
-          <div className="protocol-card" aria-label="GiwaPay settlement invariant">
-            <div className="protocol-card-head">
-              <span>PAYMENT ROUTE</span>
-              <span className="network-label">GIWA Sepolia · 91342</span>
+          <aside
+            className="checkout-preview"
+            aria-label="Testnet checkout preview / 테스트넷 결제 미리보기"
+          >
+            <div className="preview-head">
+              <span>
+                <Bilingual en="TESTNET CHECKOUT PREVIEW" ko="테스트넷 결제 미리보기" />
+              </span>
+              <span>GIWA · 91342</span>
             </div>
-            <div className="route-row">
-              <div className="token-node token-node-input">
-                <span>Customer input</span>
-                <strong>Supported ERC-20</strong>
-                <small>≤ signed max input</small>
-              </div>
-              <div className="route-arrow" aria-hidden="true">
-                <span />
-                <b>exact output</b>
-              </div>
-              <div className="token-node token-node-output">
-                <span>Merchant settlement</span>
-                <strong>Chosen ERC-20</strong>
-                <small>= signed exact amount</small>
-              </div>
+            <div className="merchant-row">
+              <span className="merchant-mark" aria-hidden="true">
+                N
+              </span>
+              <span>
+                <strong>Namu Studio</strong>
+                <small>
+                  <Bilingual en="Annual design toolkit" ko="연간 디자인 툴킷" />
+                </small>
+              </span>
             </div>
-            <div className="invariant">
-              <span>ATOMIC INVARIANT</span>
-              <code>settled == exactAmount</code>
+            <p className="preview-label">
+              <Bilingual en="Merchant receives exactly" ko="판매자가 정확히 받는 금액" />
+            </p>
+            <p className="preview-amount">48,000 MockKRW</p>
+            <div className="preview-row">
+              <span>
+                <Bilingual en="Customer pays with" ko="고객 결제 자산" />
+              </span>
+              <strong>MockALT</strong>
             </div>
-            <div className="distribution">
-              <div>
-                <span className="distribution-dot distribution-dot-green" />
-                Registered split
-              </div>
-              <div>
-                <span className="distribution-dot distribution-dot-blue" />
-                Platform fee
-              </div>
-              <div>
-                <span className="distribution-dot distribution-dot-white" />
-                Unused input refund
-              </div>
+            <div className="preview-row">
+              <span>
+                <Bilingual en="Maximum input" ko="최대 입력액" />
+              </span>
+              <strong>12.57 MockALT</strong>
             </div>
-            <p>All complete in one transaction—or all revert.</p>
-          </div>
+            <div className="preview-state">
+              <span aria-hidden="true" />
+              <Bilingual en="Preview only · No wallet action" ko="미리보기 전용 · 지갑 작업 없음" />
+            </div>
+          </aside>
         </section>
 
-        <section className="section" id="flow">
+        <section className="flow-section" aria-labelledby="flow-title">
           <div className="section-heading">
-            <p className="eyebrow">THE PAYMENT PATH</p>
-            <h2>Flexible at checkout. Precise at settlement.</h2>
+            <p className="eyebrow">
+              <Bilingual en="THE SIMPLE PATH" ko="간단한 결제 흐름" />
+            </p>
+            <h2 id="flow-title">
+              <Bilingual en="Three steps. That is it." ko="세 단계면 충분합니다." />
+            </h2>
             <p>
-              The backend prepares intent data, the customer authorizes the transaction, and
-              canonical chain evidence—not a client-side state—decides success.
+              <Bilingual
+                en="Create a link, let the customer choose an asset, and settle after onchain verification."
+                ko="링크를 만들고, 고객이 자산을 고르면, 온체인 검증 후 정산됩니다."
+              />
             </p>
           </div>
-          <ol className="flow-grid">
+
+          <ol className="quick-flow">
             <li>
-              <span className="flow-number">01</span>
-              <div className="flow-icon">I</div>
-              <h3>Signed intent</h3>
-              <p>
-                A delegated invoice signer commits to the exact settlement terms and a
-                registry-owned split.
-              </p>
-              <code>EIP-712 · replay protected</code>
+              <span>1</span>
+              <strong>
+                <Bilingual en="Set the amount" ko="금액 입력" />
+              </strong>
             </li>
             <li>
-              <span className="flow-number">02</span>
-              <div className="flow-icon">A</div>
-              <h3>Atomic routing</h3>
-              <p>
-                Pay directly or through a code-hash checked exact-output adapter with input caps.
-              </p>
-              <code>approve → swap → distribute</code>
+              <span>2</span>
+              <strong>
+                <Bilingual en="Choose an asset" ko="결제 자산 선택" />
+              </strong>
             </li>
             <li>
-              <span className="flow-number">03</span>
-              <div className="flow-icon">V</div>
-              <h3>Canonical verification</h3>
-              <p>
-                An independent indexer verifies confirmations and settlement events before success.
-              </p>
-              <code>event → receipt → webhook</code>
+              <span>3</span>
+              <strong>
+                <Bilingual en="Verify and settle" ko="검증 후 정산" />
+              </strong>
             </li>
           </ol>
-        </section>
 
-        <section className="proof-section" id="proof">
-          <div className="proof-copy">
-            <p className="eyebrow">IMPLEMENTED, NOT SIMULATED</p>
-            <h2>A reviewable proof product.</h2>
-            <p>
-              The public repository contains the contracts, API, indexer, webhook worker, dashboard,
-              SDK, deployment scripts, threat model, and fail-closed local acceptance flow.
-            </p>
-            <a href={`${github}/blob/main/docs/testing.md`} target="_blank" rel="noreferrer">
-              Open the verification guide
-              <ArrowIcon />
-            </a>
-          </div>
-          <div className="proof-list">
-            <article>
-              <span className="proof-check">
-                <CheckIcon />
+          <details className="operations-disclosure">
+            <summary>
+              <span>
+                <strong>
+                  <Bilingual en="How it works and security boundaries" ko="운영 원리와 보안 경계" />
+                </strong>
+                <small>
+                  <Bilingual
+                    en="Signing, atomic routing, verification, and scope"
+                    ko="서명, 원자적 라우팅, 검증과 구현 범위"
+                  />
+                </small>
               </span>
-              <div>
-                <strong>Contract assurance</strong>
-                <p>Unit, fuzz, invariant, malicious-adapter, and accounting coverage in Foundry.</p>
-              </div>
-            </article>
-            <article>
-              <span className="proof-check">
-                <CheckIcon />
-              </span>
-              <div>
-                <strong>End-to-end local settlement</strong>
-                <p>
-                  Anvil + PostgreSQL exercise payment, verified indexing, signed webhook, and
-                  merchant-funded refund.
+            </summary>
+
+            <div className="disclosure-body">
+              <section aria-labelledby="operation-title">
+                <p className="eyebrow">
+                  <Bilingual en="HOW IT WORKS" ko="운영 원리" />
                 </p>
-              </div>
-            </article>
-            <article>
-              <span className="proof-check">
-                <CheckIcon />
-              </span>
-              <div>
-                <strong>Operational packaging</strong>
-                <p>Separate API, indexer, and webhook processes with Docker and CI definitions.</p>
-              </div>
-            </article>
-          </div>
-        </section>
+                <h3 id="operation-title">
+                  <Bilingual en="Verified before success." ko="검증된 뒤에만 성공합니다." />
+                </h3>
+                <div className="detail-grid">
+                  <article>
+                    <span>01</span>
+                    <h4>
+                      <Bilingual en="Merchant signed" ko="판매자 서명" />
+                    </h4>
+                    <p>
+                      <Bilingual
+                        en="EIP-712 fixes the token, amount, registered recipients, and expiry."
+                        ko="정산 토큰, 금액, 등록 수령인과 만료를 EIP-712 서명에 고정합니다."
+                      />
+                    </p>
+                  </article>
+                  <article>
+                    <span>02</span>
+                    <h4>
+                      <Bilingual en="Atomic execution" ko="원자적 실행" />
+                    </h4>
+                    <p>
+                      <Bilingual
+                        en="Payment, swap, fee, and split settlement all complete or all revert."
+                        ko="결제, 교환, 수수료와 분할 정산이 모두 실행되거나 모두 되돌아갑니다."
+                      />
+                    </p>
+                  </article>
+                  <article>
+                    <span>03</span>
+                    <h4>
+                      <Bilingual en="Independent verification" ko="독립 검증" />
+                    </h4>
+                    <p>
+                      <Bilingual
+                        en="Receipts and webhooks succeed only after canonical chain events are verified."
+                        ko="정규 체인 이벤트를 확인한 뒤에만 영수증과 웹훅을 성공 처리합니다."
+                      />
+                    </p>
+                  </article>
+                </div>
+              </section>
 
-        <section className="section boundaries" id="boundaries">
-          <div className="section-heading">
-            <p className="eyebrow">SECURITY BOUNDARIES</p>
-            <h2>Clear about what exists—and what does not.</h2>
-          </div>
-          <div className="boundary-grid">
-            <article>
-              <span>01</span>
-              <h3>Never custodial</h3>
-              <p>
-                No GiwaPay balance exists between transactions. Funds either settle atomically or
-                revert.
-              </p>
-            </article>
-            <article>
-              <span>02</span>
-              <h3>No arbitrary recipients</h3>
-              <p>
-                A compromised invoice signer cannot replace merchant-admin registered split
-                recipients.
-              </p>
-            </article>
-            <article>
-              <span>03</span>
-              <h3>No fake integrations</h3>
-              <p>
-                Mocks are labelled and isolated. Mainnet, fiat rails, gasless paymasters, and
-                production DEXes are absent.
-              </p>
-            </article>
-            <article>
-              <span>04</span>
-              <h3>Not audited</h3>
-              <p>
-                This is an unaudited testnet MVP, not production-ready, regulated, or officially
-                partnered with GIWA.
-              </p>
-            </article>
-          </div>
-        </section>
+              <section className="boundary-section" aria-labelledby="boundary-title">
+                <p className="eyebrow">
+                  <Bilingual en="SECURITY BOUNDARIES" ko="보안 경계" />
+                </p>
+                <h3 id="boundary-title">
+                  <Bilingual en="Clear about the limits." ko="구현 범위를 명확하게 밝힙니다." />
+                </h3>
+                <ul className="boundary-list">
+                  <li>
+                    <strong>
+                      <Bilingual en="Non-custodial" ko="비수탁" />
+                    </strong>
+                    <span>
+                      <Bilingual
+                        en="No GiwaPay balance exists between transactions."
+                        ko="트랜잭션 사이에 GiwaPay 잔액이 존재하지 않습니다."
+                      />
+                    </span>
+                  </li>
+                  <li>
+                    <strong>
+                      <Bilingual en="Registered recipients" ko="등록된 수령인" />
+                    </strong>
+                    <span>
+                      <Bilingual
+                        en="An invoice signer cannot replace merchant-admin registered splits."
+                        ko="청구서 서명자는 판매자 관리자가 등록한 분배 대상을 바꿀 수 없습니다."
+                      />
+                    </span>
+                  </li>
+                  <li>
+                    <strong>
+                      <Bilingual en="Mocks stay labelled" ko="Mock은 명확히 표시" />
+                    </strong>
+                    <span>
+                      <Bilingual
+                        en="No production DEX, fiat rail, mainnet, or gasless integration is claimed."
+                        ko="프로덕션 DEX, 법정화폐 결제망, 메인넷 또는 가스리스 연동을 주장하지 않습니다."
+                      />
+                    </span>
+                  </li>
+                  <li>
+                    <strong>
+                      <Bilingual en="Not audited" ko="감사 미완료" />
+                    </strong>
+                    <span>
+                      <Bilingual
+                        en="This testnet MVP is not production-ready or officially partnered with GIWA."
+                        ko="이 테스트넷 MVP는 프로덕션 준비 또는 GIWA 공식 파트너십을 주장하지 않습니다."
+                      />
+                    </span>
+                  </li>
+                </ul>
+              </section>
 
-        <section className="closing">
-          <div>
-            <p className="eyebrow">OPEN FOR REVIEW</p>
-            <h2>Inspect every settlement assumption.</h2>
-          </div>
-          <div className="closing-links">
-            <a href={`${github}#readme`} target="_blank" rel="noreferrer">
-              README <ArrowIcon />
-            </a>
-            <a href={`${github}/blob/main/docs/threat-model.md`} target="_blank" rel="noreferrer">
-              Threat model <ArrowIcon />
-            </a>
-            <a href={`${github}/blob/main/docs/api.md`} target="_blank" rel="noreferrer">
-              API docs <ArrowIcon />
-            </a>
-          </div>
+              <nav className="detail-links" aria-label="Technical references / 기술 문서">
+                <a
+                  href={`${github}/blob/main/docs/architecture.md`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Bilingual en="Architecture" ko="아키텍처" />
+                </a>
+                <a
+                  href={`${github}/blob/main/docs/threat-model.md`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Bilingual en="Threat model" ko="위협 모델" />
+                </a>
+                <a href={`${github}/blob/main/docs/api.md`} target="_blank" rel="noreferrer">
+                  <Bilingual en="API docs" ko="API 문서" />
+                </a>
+              </nav>
+            </div>
+          </details>
         </section>
       </main>
 
@@ -280,8 +329,15 @@ export default function Home() {
           </span>
           <span>GiwaPay</span>
         </a>
-        <p>Pay with anything. Settle exactly.</p>
-        <p>Open-source testnet MVP · 2026</p>
+        <p>
+          <Bilingual
+            en="Pay with anything. Settle exactly."
+            ko="결제는 자유롭게. 정산은 정확하게."
+          />
+        </p>
+        <p>
+          <Bilingual en="Open-source testnet MVP · 2026" ko="오픈소스 테스트넷 MVP · 2026" />
+        </p>
       </footer>
     </div>
   );

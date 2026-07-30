@@ -35,6 +35,7 @@ const paymentIntent = {
 };
 const merchantProfile = {
   id: '20000000-0000-4000-8000-000000000002',
+  onchainMerchantAddress: merchant,
   adminAddress: merchant,
   payoutAddress: recipient,
   delegatedSignerAddress: merchant,
@@ -45,6 +46,10 @@ const merchantProfile = {
   createdAt: '2026-07-28T00:00:00.000Z',
   updatedAt: '2026-07-28T00:00:00.000Z',
 };
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem('giwapay.locale', 'en'));
+});
 
 test('hosted checkout displays a live API-backed exact-output quote', async ({ page }) => {
   await page.route('http://127.0.0.1:3001/v1/payment-methods**', async (route) => {
@@ -120,17 +125,36 @@ test('hosted checkout displays a live API-backed exact-output quote', async ({ p
   await expect(page.getByText('Testnet Namu Studio')).toBeVisible();
   await expect(page.getByText('Testnet demo design toolkit')).toBeVisible();
   await expect(page.getByText('48,000 MockKRW')).toBeVisible();
-  await expect(page.getByText('mock-fixed-rate')).toBeVisible();
   await expect(page.getByText('1.00%', { exact: true })).toBeVisible();
+  await expect(page.getByText('mock-fixed-rate')).toBeHidden();
+  await expect(page.getByText(recipient, { exact: true })).toBeHidden();
+  await page.getByText('Payment route and verification details', { exact: true }).click();
+  await expect(page.getByText('mock-fixed-rate')).toBeVisible();
   await expect(page.getByText(recipient, { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /Connect wallet/i })).toBeVisible();
-  await expect(page.getByText(/wallet submission is not a successful payment/i)).toBeVisible();
+  await expect(page.getByText(/payment completes after onchain verification/i)).toBeVisible();
+
+  await page.getByRole('button', { name: '한국어' }).click();
+  await expect(page.getByText('판매자가 정확히 받는 금액')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '결제 상세' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '지갑 연결' })).toBeVisible();
 });
 
 test('landing page remains usable on a narrow mobile viewport', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /Pay with anything/i })).toBeVisible();
-  await expect(page.getByText('Testnet demo · No real-value token')).toBeVisible();
+  await expect(page.getByText('Testnet demo · Mock tokens have no real-world value')).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Language / 언어' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ENGLISH' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.getByText('EIP-712 fixes the token')).toBeHidden();
+  await page.getByText('How it works and security boundaries', { exact: true }).click();
+  await expect(page.getByText('EIP-712 fixes the token')).toBeVisible();
+  await page.getByRole('button', { name: '한국어' }).click();
+  await expect(page.getByRole('heading', { name: /결제는 자유롭게/ })).toBeVisible();
+  await expect(page.getByText('운영 원리와 보안 경계', { exact: true })).toBeVisible();
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
   );
@@ -169,13 +193,116 @@ test('merchant dashboard exposes navigation and chain-verified copy', async ({ p
   await page.goto('/dashboard');
 
   await expect(page.getByRole('heading', { name: 'Testnet Namu Studio' })).toBeVisible();
-  await expect(
-    page.getByText('The latest 50 records below come from the chain-indexed database.'),
-  ).toBeVisible();
+  await expect(page.getByText('Only chain-verified payment state is shown here.')).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Merchant dashboard' })).toBeVisible();
   await page.getByRole('link', { name: 'API keys' }).click();
   await expect(page.getByRole('heading', { name: 'API keys', exact: true })).toBeVisible();
   await expect(page.getByText('No API keys')).toBeVisible();
+});
+
+test('merchant operations keep raw identifiers behind optional details', async ({ page }) => {
+  await page.route('http://127.0.0.1:3001/v1/api-keys', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [
+          {
+            id: '30000000-0000-4000-8000-000000000003',
+            name: 'Checkout server',
+            prefix: 'gp_test_1234',
+            scopes: ['payment_intents:read', 'payment_intents:write'],
+            expiresAt: null,
+            revokedAt: null,
+            createdAt: '2026-07-28T00:00:00.000Z',
+            lastUsedAt: null,
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto('/dashboard/api-keys');
+  await expect(page.getByText('Checkout server')).toBeVisible();
+  await expect(page.getByText('gp_test_1234…', { exact: true })).toBeHidden();
+  await page.getByText('Credential details', { exact: true }).click();
+  await expect(page.getByText('gp_test_1234…', { exact: true })).toBeVisible();
+
+  await page.goto('/dashboard/splits');
+  await expect(page.getByText(/compromised invoice signer/i)).toBeHidden();
+  await page.getByText('How split templates stay safe', { exact: true }).click();
+  await expect(page.getByText(/compromised invoice signer/i)).toBeVisible();
+
+  await page.route('http://127.0.0.1:3001/v1/payment-intents?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [{ ...paymentIntent, status: 'succeeded' }],
+        pagination: { limit: 100, offset: 0, hasMore: false },
+      }),
+    });
+  });
+  await page.goto('/dashboard/refunds');
+  await expect(page.getByText(intentId, { exact: true })).toBeHidden();
+  await page.getByText('Payment details', { exact: true }).click();
+  await expect(page.getByText(intentId, { exact: true })).toBeVisible();
+});
+
+test('payment-link creation keeps advanced settlement settings out of the primary flow', async ({
+  page,
+}) => {
+  await page.route('http://127.0.0.1:3001/v1/payment-intents?**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [],
+        pagination: { limit: 25, offset: 0, hasMore: false },
+      }),
+    });
+  });
+  await page.route('http://127.0.0.1:3001/v1/payment-methods**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: [
+          {
+            token: {
+              address: mockUsdc,
+              symbol: 'MockUSDC',
+              name: 'MockUSDC',
+              decimals: 6,
+              testOnly: true,
+            },
+            settlementToken: {
+              address: mockKrw,
+              symbol: 'MockKRW',
+              name: 'MockKRW',
+              decimals: 6,
+              testOnly: true,
+            },
+            route: {
+              adapter,
+              adapterIdentifier: 'mock-fixed-rate',
+              defaultSlippageBps: 100,
+              maxInputCap: '1000000000',
+            },
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/dashboard/payment-links');
+
+  await expect(page.getByLabel('Product description')).toBeVisible();
+  await expect(page.getByLabel('Exact settlement amount')).toBeVisible();
+  await expect(page.getByLabel('Expires at')).toBeHidden();
+  await expect(page.getByLabel('Registered settlement splitId')).toBeHidden();
+  await page.getByText('Advanced settlement settings', { exact: true }).click();
+  await expect(page.getByLabel('Expires at')).toBeVisible();
+  await expect(page.getByLabel('Registered settlement splitId')).toBeVisible();
 });
 
 test('receipt success is derived from verified API state and supports local hashes', async ({
@@ -216,8 +343,13 @@ test('receipt success is derived from verified API state and supports local hash
 
   await expect(page.getByRole('heading', { name: 'Payment verified' })).toBeVisible();
   await expect(page.getByText(/independently matched/)).toBeVisible();
-  await expect(page.getByText('48,000 MockKRW received')).toBeVisible();
+  await expect(page.getByText('48,000 MockKRW', { exact: true })).toBeVisible();
   await expect(page.getByText(/Local Anvil transaction/)).toBeVisible();
+  await expect(page.getByText(verifiedIntent.paymentId, { exact: true })).toBeHidden();
+  await page.getByText('Receipt details and verification', { exact: true }).click();
+  await expect(page.getByText(verifiedIntent.paymentId, { exact: true })).toBeVisible();
+  await expect(page.getByText('48,000 MockKRW received')).toBeVisible();
+  await expect(page.getByText(/chain-indexed verification/)).toBeVisible();
   await expect(page.locator(`a[href*="sepolia-explorer.giwa.io/tx"]`)).toHaveCount(0);
 });
 

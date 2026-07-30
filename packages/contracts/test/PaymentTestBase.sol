@@ -86,6 +86,7 @@ abstract contract PaymentTestBase is Test {
         intent = PaymentRouter.PaymentIntent({
             intentId: intentId,
             merchant: merchant,
+            signer: delegatedSigner,
             settlementToken: settlementToken,
             settlementAmount: settlementAmount,
             splitId: splitId,

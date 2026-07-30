@@ -13,6 +13,9 @@ import { giwaPayClient } from '@/lib/api';
 import { DEFAULT_SPLIT_ID, getConfiguredToken } from '@/lib/config';
 import { formatDateTime } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
+import { useGiwaPayLocale } from './language-toggle';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 import { StatusBadge } from './status-badge';
 
 const defaultExpiry = (): string => {
@@ -22,6 +25,7 @@ const defaultExpiry = (): string => {
 };
 
 export function PaymentLinksPanel() {
+  const ko = useGiwaPayLocale() === 'ko';
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [tokenAddress, setTokenAddress] = useState('');
@@ -92,14 +96,22 @@ export function PaymentLinksPanel() {
     <>
       <div className="page-heading">
         <div>
-          <h1>Payment links</h1>
-          <p>Create a signed PaymentIntent, hosted checkout link, and QR code.</p>
+          <h1>
+            <Bilingual ko="결제 링크" en="Payment links" />
+          </h1>
+          <Bilingual
+            as="div"
+            ko="서명된 결제 요청, 호스팅 결제 링크와 QR 코드를 만드세요."
+            en="Create a signed PaymentIntent, hosted checkout link, and QR code."
+          />
         </div>
       </div>
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
-          <h2>Create payment intent</h2>
+          <h2>
+            <Bilingual ko="결제 요청 만들기" en="Create payment intent" />
+          </h2>
           <span className={`gp-badge gp-badge--${selectedToken?.testOnly ? 'warning' : 'info'}`}>
             {selectedToken?.testOnly ? 'Testnet demo' : 'GIWA Sepolia'}
           </span>
@@ -121,20 +133,28 @@ export function PaymentLinksPanel() {
             </div>
           ) : null}
           <div className="form-grid">
-            <Field label="Product description" htmlFor="intent-description" className="full">
+            <Field
+              label={ko ? '상품 설명' : 'Product description'}
+              htmlFor="intent-description"
+              className="full"
+            >
               <Input
                 id="intent-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder="Annual design toolkit"
+                placeholder={ko ? '연간 디자인 툴킷' : 'Annual design toolkit'}
                 maxLength={500}
                 required
               />
             </Field>
             <Field
-              label="Exact settlement amount"
+              label={ko ? '정확한 정산 금액' : 'Exact settlement amount'}
               htmlFor="settlement-amount"
-              hint="The merchant receives this exact amount, excluding the separately disclosed platform fee."
+              hint={
+                ko
+                  ? '판매자는 이 금액을 정확히 받으며, 플랫폼 수수료는 별도로 표시됩니다.'
+                  : 'The merchant receives this exact amount; the platform fee is shown separately.'
+              }
             >
               <Input
                 id="settlement-amount"
@@ -145,7 +165,7 @@ export function PaymentLinksPanel() {
                 required
               />
             </Field>
-            <Field label="Settlement token" htmlFor="settlement-token">
+            <Field label={ko ? '정산 자산' : 'Settlement token'} htmlFor="settlement-token">
               <Select
                 id="settlement-token"
                 value={activeTokenAddress}
@@ -160,36 +180,51 @@ export function PaymentLinksPanel() {
                 ))}
               </Select>
             </Field>
-            <Field label="Expires at" htmlFor="expires-at" className="full">
-              <Input
-                id="expires-at"
-                type="datetime-local"
-                value={expiresAt}
-                min={defaultExpiry()}
-                onChange={(event) => setExpiresAt(event.target.value)}
-                required
-              />
-            </Field>
-            <Field
-              label="Registered settlement splitId"
-              htmlFor="split-id"
-              hint="Use zero for the default 100% payout, or copy an enabled immutable template from Settlement splits."
-              className="full"
-            >
-              <Input
-                id="split-id"
-                className="mono"
-                value={splitId}
-                onChange={(event) => setSplitId(event.target.value)}
-                pattern="^0x[a-fA-F0-9]{64}$"
-                spellCheck={false}
-                required
-              />
-              <Link className="explorer-link" href="/dashboard/splits">
-                Manage registered splits
-              </Link>
-            </Field>
           </div>
+          <ProgressiveDisclosure
+            summary={ko ? '고급 정산 설정' : 'Advanced settlement settings'}
+            description={
+              ko
+                ? '기본값: 30분 후 만료 · 지급 주소로 100% 정산'
+                : 'Default: expires in 30 minutes · 100% to the payout address'
+            }
+          >
+            <div className="form-grid">
+              <Field label={ko ? '만료 시각' : 'Expires at'} htmlFor="expires-at" className="full">
+                <Input
+                  id="expires-at"
+                  type="datetime-local"
+                  value={expiresAt}
+                  min={defaultExpiry()}
+                  onChange={(event) => setExpiresAt(event.target.value)}
+                  required
+                />
+              </Field>
+              <Field
+                label={ko ? '등록된 정산 분배 ID' : 'Registered settlement splitId'}
+                htmlFor="split-id"
+                hint={
+                  ko
+                    ? '기본 100% 지급은 0을 사용하고, 다른 분배는 정산 분배에서 복사하세요.'
+                    : 'Use zero for the default 100% payout, or copy an enabled template from Settlement splits.'
+                }
+                className="full"
+              >
+                <Input
+                  id="split-id"
+                  className="mono"
+                  value={splitId}
+                  onChange={(event) => setSplitId(event.target.value)}
+                  pattern="^0x[a-fA-F0-9]{64}$"
+                  spellCheck={false}
+                  required
+                />
+                <Link className="explorer-link" href="/dashboard/splits">
+                  {ko ? '정산 분배 관리' : 'Manage registered splits'}
+                </Link>
+              </Field>
+            </div>
+          </ProgressiveDisclosure>
           {error ? (
             <p className="gp-field-error" role="alert">
               {error}
@@ -202,7 +237,7 @@ export function PaymentLinksPanel() {
               loading={creating}
               disabled={settlementTokens.length === 0 || methods.isLoading}
             >
-              <Plus size={15} /> Create payment link
+              <Plus size={15} /> {ko ? '결제 링크 만들기' : 'Create payment link'}
             </Button>
           </div>
         </form>
@@ -245,7 +280,9 @@ export function PaymentLinksPanel() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Recent links</h2>
+          <h2>
+            <Bilingual ko="최근 링크" en="Recent links" />
+          </h2>
         </div>
         {intents.isLoading ? (
           <LoadingState />
@@ -254,7 +291,7 @@ export function PaymentLinksPanel() {
             <ErrorState error={intents.error} />
           </div>
         ) : intents.data?.data.length ? (
-          <table className="data-table">
+          <table className="data-table compact-table">
             <thead>
               <tr>
                 <th>Description</th>

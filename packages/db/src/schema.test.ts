@@ -6,7 +6,10 @@ import {
   apiKeys,
   authNonces,
   chainEvents,
+  merchantSignerKeys,
+  merchants,
   paymentIntents,
+  requestRateLimits,
   refundRequests,
   sessions,
 } from './schema.js';
@@ -21,6 +24,21 @@ describe('security-sensitive database constraints', () => {
   });
 
   it('has idempotency and canonical-chain uniqueness boundaries', () => {
+    expect(
+      getTableConfig(merchants).indexes.some(
+        (index) => index.config.name === 'merchants_onchain_address_uq',
+      ),
+    ).toBe(true);
+    expect(
+      getTableConfig(merchantSignerKeys).indexes.some(
+        (index) => index.config.name === 'merchant_signer_keys_key_id_uq',
+      ),
+    ).toBe(true);
+    expect(
+      getTableConfig(merchantSignerKeys).indexes.some(
+        (index) => index.config.name === 'merchant_signer_keys_signer_address_uq',
+      ),
+    ).toBe(true);
     expect(
       getTableConfig(paymentIntents).indexes.some(
         (index) => index.config.name === 'payment_intents_merchant_idempotency_uq',
@@ -58,5 +76,23 @@ describe('security-sensitive database constraints', () => {
     expect(getTableConfig(apiKeys).columns.map((column) => column.name)).toContain(
       'idempotency_key',
     );
+    const identityMigration = readFileSync(
+      new URL('../migrations/0001_stable_merchant_identity.sql', import.meta.url),
+      'utf8',
+    );
+    expect(identityMigration).toContain('"onchain_merchant_address"');
+    expect(identityMigration).toContain('"wallet_address"');
+    const rateLimitMigration = readFileSync(
+      new URL('../migrations/0002_distributed_rate_limits.sql', import.meta.url),
+      'utf8',
+    );
+    expect(rateLimitMigration).toContain('CREATE UNLOGGED TABLE "request_rate_limits"');
+    expect(getTableConfig(requestRateLimits).primaryKeys).toHaveLength(1);
+    const signerKeysMigration = readFileSync(
+      new URL('../migrations/0003_merchant_signer_keys.sql', import.meta.url),
+      'utf8',
+    );
+    expect(signerKeysMigration).toContain('CREATE TABLE "merchant_signer_keys"');
+    expect(signerKeysMigration).toContain('"merchant_signer_keys_key_id_uq"');
   });
 });

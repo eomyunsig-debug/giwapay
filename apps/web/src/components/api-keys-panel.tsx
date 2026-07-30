@@ -9,8 +9,12 @@ import { Button, Card, Field, Input } from '@giwapay/ui';
 import { giwaPayClient } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { ErrorState, LoadingState } from './async-state';
+import { Bilingual } from './bilingual';
+import { useGiwaPayLocale } from './language-toggle';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 
 export function ApiKeysPanel() {
+  const ko = useGiwaPayLocale() === 'ko';
   const [name, setName] = useState('');
   const [created, setCreated] = useState<CreatedApiKey>();
   const [creating, setCreating] = useState(false);
@@ -39,7 +43,13 @@ export function ApiKeysPanel() {
   };
 
   const revoke = async (id: string) => {
-    if (!window.confirm('Revoke this API key? Existing integrations will stop working.')) {
+    if (
+      !window.confirm(
+        ko
+          ? '이 API 키를 폐기할까요? 기존 연동이 즉시 중단됩니다.'
+          : 'Revoke this API key? Existing integrations will stop working.',
+      )
+    ) {
       return;
     }
     setRevoking(id);
@@ -65,15 +75,21 @@ export function ApiKeysPanel() {
     <>
       <div className="page-heading">
         <div>
-          <h1>API keys</h1>
-          <p>Create scoped merchant credentials for your server integration.</p>
+          <h1>
+            <Bilingual ko="API 키" en="API keys" />
+          </h1>
+          <Bilingual
+            as="div"
+            ko="서버 연동을 위한 범위 제한 판매자 인증 정보를 만드세요."
+            en="Create scoped merchant credentials for your server integration."
+          />
         </div>
       </div>
 
       {created ? (
         <div className="secret-box" role="status" style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <strong>Copy this key now</strong>
+            <strong>{ko ? '지금 이 키를 복사하세요' : 'Copy this key now'}</strong>
             <button
               type="button"
               className="gp-button gp-button--ghost gp-button--sm"
@@ -84,33 +100,41 @@ export function ApiKeysPanel() {
             </button>
           </div>
           <p className="gp-field-hint">
-            For your security, the plaintext key is returned once and is never shown again.
+            {ko
+              ? '한 번만 표시됩니다. 닫기 전에 서버의 시크릿 관리자에 저장하세요.'
+              : 'Shown once. Store it in your server secret manager before closing this message.'}
           </p>
           <code className="secret-value">{created.key}</code>
           <Button variant="secondary" size="sm" onClick={copy}>
             {copied ? <Check size={13} /> : <Copy size={13} />}
-            {copied ? 'Copied' : 'Copy API key'}
+            {copied ? (ko ? '복사됨' : 'Copied') : ko ? 'API 키 복사' : 'Copy API key'}
           </Button>
         </div>
       ) : null}
 
       <Card className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-header">
-          <h2>Create API key</h2>
+          <h2>
+            <Bilingual ko="API 키 만들기" en="Create API key" />
+          </h2>
         </div>
         <form className="panel-body" onSubmit={create}>
           <div className="form-grid">
             <Field
-              label="Key name"
+              label={ko ? '키 이름' : 'Key name'}
               htmlFor="api-key-name"
-              hint="Use a descriptive environment and service name."
+              hint={
+                ko
+                  ? '사용할 환경이나 서비스 이름을 입력하세요.'
+                  : 'Name the environment or service that will use it.'
+              }
               className="full"
             >
               <Input
                 id="api-key-name"
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Production checkout server"
+                placeholder={ko ? '프로덕션 결제 서버' : 'Production checkout server'}
                 minLength={1}
                 maxLength={80}
                 required
@@ -124,7 +148,7 @@ export function ApiKeysPanel() {
           ) : null}
           <div className="form-actions">
             <Button type="submit" loading={creating}>
-              <Plus size={14} /> Create key
+              <Plus size={14} /> {ko ? '키 만들기' : 'Create key'}
             </Button>
           </div>
         </form>
@@ -132,7 +156,9 @@ export function ApiKeysPanel() {
 
       <Card className="panel">
         <div className="panel-header">
-          <h2>Active credentials</h2>
+          <h2>
+            <Bilingual ko="활성 인증 정보" en="Active credentials" />
+          </h2>
         </div>
         {keys.isLoading ? (
           <LoadingState />
@@ -141,13 +167,11 @@ export function ApiKeysPanel() {
             <ErrorState error={keys.error} />
           </div>
         ) : keys.data?.length ? (
-          <table className="data-table">
+          <table className="data-table compact-table api-key-table">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Prefix</th>
-                <th>Created</th>
-                <th>Last used</th>
+                <th>{ko ? '이름' : 'Name'}</th>
+                <th>{ko ? '상태' : 'Status'}</th>
                 <th aria-label="Actions" />
               </tr>
             </thead>
@@ -156,17 +180,47 @@ export function ApiKeysPanel() {
                 <tr key={key.id}>
                   <td>
                     <span className="table-primary">{key.name}</span>
+                    <ProgressiveDisclosure
+                      className="api-key-row-disclosure"
+                      summary={ko ? '인증 정보 상세' : 'Credential details'}
+                      description={ko ? '접두어와 사용 기록' : 'Prefix and usage history'}
+                    >
+                      <dl>
+                        <div className="gp-definition-row">
+                          <dt>{ko ? '접두어' : 'Prefix'}</dt>
+                          <dd className="mono">{key.prefix}…</dd>
+                        </div>
+                        <div className="gp-definition-row">
+                          <dt>{ko ? '생성' : 'Created'}</dt>
+                          <dd>{formatDateTime(key.createdAt)}</dd>
+                        </div>
+                        <div className="gp-definition-row">
+                          <dt>{ko ? '마지막 사용' : 'Last used'}</dt>
+                          <dd>
+                            {key.lastUsedAt
+                              ? formatDateTime(key.lastUsedAt)
+                              : ko
+                                ? '사용 안 함'
+                                : 'Never'}
+                          </dd>
+                        </div>
+                      </dl>
+                    </ProgressiveDisclosure>
                   </td>
-                  <td className="mono">{key.prefix}…</td>
-                  <td>{formatDateTime(key.createdAt)}</td>
-                  <td>{key.lastUsedAt ? formatDateTime(key.lastUsedAt) : 'Never'}</td>
+                  <td>
+                    <span
+                      className={`gp-badge gp-badge--${key.lastUsedAt ? 'success' : 'neutral'}`}
+                    >
+                      {key.lastUsedAt ? (ko ? '사용됨' : 'Used') : ko ? '미사용' : 'Unused'}
+                    </span>
+                  </td>
                   <td>
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => revoke(key.id)}
                       loading={revoking === key.id}
-                      aria-label={`Revoke ${key.name}`}
+                      aria-label={ko ? `${key.name} 폐기` : `Revoke ${key.name}`}
                     >
                       <Trash2 size={14} />
                     </Button>
@@ -180,8 +234,12 @@ export function ApiKeysPanel() {
             <span className="empty-icon">
               <KeyRound size={19} />
             </span>
-            <h3>No API keys</h3>
-            <p>Create a credential only for a server-side integration.</p>
+            <h3>{ko ? 'API 키가 없습니다' : 'No API keys'}</h3>
+            <p>
+              {ko
+                ? '서버 연동에 필요한 인증 정보만 만드세요.'
+                : 'Create a credential only for a server-side integration.'}
+            </p>
           </div>
         )}
       </Card>

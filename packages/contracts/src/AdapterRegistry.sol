@@ -7,8 +7,9 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IAdapterRegistry} from "./interfaces/IAdapterRegistry.sol";
 
 /// @title GiwaPay exact-output adapter registry
-/// @notice Allow-lists immutable adapter bytecode, token pairs and per-input
-/// token caps. Runtime code is checked on every payment.
+/// @notice Allow-lists pinned adapter bytecode, token pairs and per-input
+/// token caps. Runtime code is checked on every payment and bytecode containing
+/// the DELEGATECALL opcode is rejected at registration.
 contract AdapterRegistry is IAdapterRegistry, Ownable2Step, Pausable {
     bytes32 public constant ADAPTER_MANAGER_ROLE = keccak256("ADAPTER_MANAGER_ROLE");
 
@@ -30,6 +31,7 @@ contract AdapterRegistry is IAdapterRegistry, Ownable2Step, Pausable {
     error UnauthorizedAdapterManager();
     error ZeroAddress();
     error AdapterHasNoCode();
+    error AdapterDelegatecallForbidden();
     error AdapterAlreadyRegistered();
     error AdapterNotRegistered();
     error EmptyIdentifier();
@@ -89,6 +91,7 @@ contract AdapterRegistry is IAdapterRegistry, Ownable2Step, Pausable {
     function registerAdapter(address adapter, string calldata identifier, bool testOnly) external onlyAdapterManager {
         if (adapter == address(0)) revert ZeroAddress();
         if (adapter.code.length == 0) revert AdapterHasNoCode();
+        if (_containsDelegatecall(adapter)) revert AdapterDelegatecallForbidden();
         if (_adapters[adapter].runtimeCodeHash != bytes32(0)) revert AdapterAlreadyRegistered();
         if (bytes(identifier).length == 0) revert EmptyIdentifier();
         if (productionMode && testOnly) revert TestAdapterForbiddenInProduction();
@@ -186,5 +189,30 @@ contract AdapterRegistry is IAdapterRegistry, Ownable2Step, Pausable {
     function _registeredAdapter(address adapter) private view returns (AdapterConfig storage config) {
         config = _adapters[adapter];
         if (config.runtimeCodeHash == bytes32(0)) revert AdapterNotRegistered();
+    }
+
+    /// @dev Scans executable opcodes while skipping PUSH immediate data. This
+    /// rejects delegatecall-based proxies. Normal CALL indirection remains an
+    /// adapter-registration review concern.
+    function _containsDelegatecall(address adapter) private view returns (bool) {
+        uint256 length = adapter.code.length;
+        bytes memory runtime = new bytes(length);
+        assembly ("memory-safe") {
+            extcodecopy(adapter, add(runtime, 0x20), 0, length)
+        }
+
+        uint256 index;
+        while (index < length) {
+            uint8 opcode = uint8(runtime[index]);
+            if (opcode == 0xf4) return true;
+            unchecked {
+                if (opcode >= 0x60 && opcode <= 0x7f) {
+                    index += uint256(opcode) - 0x5e;
+                } else {
+                    ++index;
+                }
+            }
+        }
+        return false;
     }
 }

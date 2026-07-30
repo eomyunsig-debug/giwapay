@@ -8,7 +8,7 @@ export const paymentRouterAbi = parseAbi([
   'function platformFeeBps() view returns (uint16)',
   'function merchantRegistry() view returns (address)',
   'function adapterRegistry() view returns (address)',
-  'function pay((bytes32 intentId,address merchant,address settlementToken,uint256 settlementAmount,bytes32 splitId,bytes32 splitHash,uint256 platformFee,uint48 validAfter,uint48 expiresAt,address payer,bytes32 metadataHash) intent, bytes signature, (address tokenIn,uint256 maxAmountIn,address adapter,bytes adapterData) params) returns (uint256 amountIn)',
+  'function pay((bytes32 intentId,address merchant,address signer,address settlementToken,uint256 settlementAmount,bytes32 splitId,bytes32 splitHash,uint256 platformFee,uint48 validAfter,uint48 expiresAt,address payer,bytes32 metadataHash) intent, bytes signature, (address tokenIn,uint256 maxAmountIn,address adapter,bytes adapterData) params) returns (uint256 amountIn)',
   'function refund(address merchant,bytes32 intentId,bytes32 refundId,uint256 amount)',
   'event PaymentSucceeded(bytes32 indexed intentId,address indexed merchant,address indexed payer,address tokenIn,address settlementToken,uint256 amountIn,uint256 merchantAmount,uint256 platformFee,bytes32 splitId,address adapter)',
   'event SettlementDistributed(bytes32 indexed intentId,address indexed merchant,address indexed recipient,address settlementToken,uint256 amount,uint16 basisPoints)',
@@ -77,6 +77,20 @@ export const erc20MetadataAbi = parseAbi([
 export const merchantRegistryAbi = [
   {
     type: 'function',
+    name: 'merchantForAdmin',
+    stateMutability: 'view',
+    inputs: [{ name: 'admin', type: 'address' }],
+    outputs: [{ name: 'merchant', type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'pendingAdmin',
+    stateMutability: 'view',
+    inputs: [{ name: 'merchant', type: 'address' }],
+    outputs: [{ name: 'admin', type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'getMerchant',
     stateMutability: 'view',
     inputs: [{ name: 'merchant', type: 'address' }],
@@ -116,6 +130,7 @@ export const paymentIntentTypes = {
   PaymentIntent: [
     { name: 'intentId', type: 'bytes32' },
     { name: 'merchant', type: 'address' },
+    { name: 'signer', type: 'address' },
     { name: 'settlementToken', type: 'address' },
     { name: 'settlementAmount', type: 'uint256' },
     { name: 'splitId', type: 'bytes32' },

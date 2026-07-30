@@ -42,6 +42,13 @@ adapter-manager authority retained by the previous owner. Verify the new owner,
 the configured `ADAPTER_MANAGER_ADDRESS`, and the previous owner's revoked
 manager state on-chain before enabling application traffic.
 
+Adapter registration rejects bytecode containing the executable
+`DELEGATECALL` opcode, excluding delegatecall-based proxies and mutable
+implementation routing. Runtime code-hash pinning then detects bytecode
+replacement on every payment. This does not prove an adapter's economics or
+external dependencies are safe: review verified source, token pairs, input
+caps, ownership, and every external call before registration.
+
 ## Application configuration
 
 Copy `.env.example` outside source control and supply secrets through the
@@ -51,11 +58,14 @@ deployment platform. Required production boundaries include:
 - exact verified router, merchant registry, and adapter registry addresses;
 - platform fee bps matching the immutable router value;
 - supported token/route JSON matching on-chain adapter metadata;
-- a delegated PaymentIntent signer whose address each merchant registers;
+- `PAYMENT_INTENT_SIGNER_SOURCE=database`, a dedicated KMS readiness key, and
+  one operator-provisioned non-exportable KMS signer mapping per merchant;
 - PostgreSQL TLS/backup settings;
 - strong independent session, API-key pepper, and 32-byte webhook encryption
   keys;
 - exact HTTPS web/API origins and production cookie domain.
+- `EXPOSE_API_DOCS=false` unless public Swagger/OpenAPI routes are an explicit
+  product requirement.
 
 `NEXT_PUBLIC_*` values are public and are embedded at web image build time.
 Never place a private key, API secret, or database credential in those values.
@@ -63,13 +73,17 @@ WalletConnect is omitted unless its public project ID is configured.
 
 ## Database baseline
 
-`packages/db/migrations/0000_initial.sql` creates the current schema on a
-**fresh, empty database**. It is the repository's initial baseline, not an
-in-place migration from a prior GiwaPay schema and not a generic reconciliation
-script for hand-created tables. Disposable local and CI databases may be
-recreated. Before applying anything to retained data, take a tested backup and
-write/review an explicit migration or rebuild the chain projection with
-webhook delivery stopped.
+`packages/db/migrations/0000_initial.sql` is the **fresh, empty database**
+baseline, not a generic reconciliation script for hand-created tables.
+Subsequent numbered files are explicit ordered upgrades.
+`0001_stable_merchant_identity.sql` backfills stable merchant identity and
+session-wallet ownership from the pre-existing admin relationship before
+adding non-null and uniqueness constraints. Before applying pending migrations
+to retained data, take a tested backup, review the migration sequence, and
+stop chain projection/webhook delivery for the maintenance window.
+`0003_merchant_signer_keys.sql` adds the non-secret KMS key-ID/public-address
+mapping table. Apply it before starting an API image configured with the
+database signer source.
 
 ## Containers
 

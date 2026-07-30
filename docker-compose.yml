@@ -5,6 +5,7 @@ x-api-environment: &api-environment
   HOST: 0.0.0.0
   PORT: 3001
   LOG_LEVEL: ${LOG_LEVEL:-info}
+  EXPOSE_API_DOCS: 'true'
   DATABASE_URL: ${DATABASE_URL}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://127.0.0.1:3000}
   TRUSTED_PROXY_CIDRS: ''
@@ -19,6 +20,10 @@ x-api-environment: &api-environment
   CHAIN_EXPLORER_URL: ''
   RPC_TIMEOUT_MS: '10000'
   RPC_RETRY_COUNT: '3'
+  CHAIN_READ_CACHE_TTL_MS: '2000'
+  ROUTER_CONFIGURATION_CACHE_TTL_MS: '300000'
+  QUOTE_RATE_LIMIT_MAX: '30'
+  PREPARE_RATE_LIMIT_MAX: '20'
   CHAIN_CONFIRMATIONS: '3'
   CHAIN_START_BLOCK: '0'
   INDEXER_BATCH_SIZE: '250'
@@ -33,6 +38,11 @@ x-api-environment: &api-environment
   WEBHOOK_MAX_ATTEMPTS: '8'
   WEBHOOK_TIMEOUT_MS: '10000'
   WEBHOOK_POLL_INTERVAL_MS: '1000'
+  API_KEY_LAST_USED_WRITE_INTERVAL_MS: '300000'
+  RETENTION_POLL_INTERVAL_MS: '3600000'
+  AUTH_RETENTION_DAYS: '7'
+  WEBHOOK_RETENTION_DAYS: '90'
+  RETENTION_BATCH_SIZE: '1000'
 
 services:
   postgres:
@@ -123,6 +133,17 @@ services:
     restart: unless-stopped
     environment: *api-environment
     command: ['node', 'dist/webhook-worker.js']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  retention:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment: *api-environment
+    command: ['node', 'dist/retention-worker.js']
     depends_on:
       migrate:
         condition: service_completed_successfully

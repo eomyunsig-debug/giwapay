@@ -1,16 +1,17 @@
 import { Badge } from '@giwapay/ui';
 import type { PaymentStatus } from '@giwapay/sdk';
+import { Bilingual } from './bilingual';
 
 const statusConfig: Record<
   PaymentStatus,
-  { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }
+  { ko: string; en: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }
 > = {
-  created: { label: 'Awaiting payment', tone: 'info' },
-  submitted: { label: 'Verifying onchain', tone: 'warning' },
-  succeeded: { label: 'Paid', tone: 'success' },
-  expired: { label: 'Expired', tone: 'neutral' },
-  partially_refunded: { label: 'Partially refunded', tone: 'warning' },
-  refunded: { label: 'Refunded', tone: 'success' },
+  created: { ko: '결제 대기', en: 'Awaiting payment', tone: 'info' },
+  submitted: { ko: '온체인 검증 중', en: 'Verifying onchain', tone: 'warning' },
+  succeeded: { ko: '결제 완료', en: 'Paid', tone: 'success' },
+  expired: { ko: '만료', en: 'Expired', tone: 'neutral' },
+  partially_refunded: { ko: '일부 환불', en: 'Partially refunded', tone: 'warning' },
+  refunded: { ko: '환불 완료', en: 'Refunded', tone: 'success' },
 };
 
 export function StatusBadge({ status }: { status: PaymentStatus }) {
@@ -18,7 +19,7 @@ export function StatusBadge({ status }: { status: PaymentStatus }) {
   return (
     <Badge tone={config.tone}>
       <span className={`status-dot status-dot--${config.tone}`} />
-      {config.label}
+      <Bilingual ko={config.ko} en={config.en} />
     </Badge>
   );
 }

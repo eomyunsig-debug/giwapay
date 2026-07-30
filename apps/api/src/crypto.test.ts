@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  derivePurposeSecret,
   decodeSignedPayload,
   decryptSecret,
   encodeSignedPayload,
@@ -43,5 +44,16 @@ describe('secret handling', () => {
       expiresAt: 123,
     });
     expect(decodeSignedPayload(`${token}x`, secret)).toBeUndefined();
+  });
+
+  it('derives domain-separated keys from the session root', () => {
+    const root = 'r'.repeat(32);
+    const session = derivePurposeSecret(root, 'session-token');
+    const csrf = derivePurposeSecret(root, 'csrf');
+    const quote = derivePurposeSecret(root, 'quote-envelope');
+    expect(new Set([session, csrf, quote]).size).toBe(3);
+    const token = encodeSignedPayload({ purpose: 'quote' }, quote);
+    expect(decodeSignedPayload(token, session)).toBeUndefined();
+    expect(decodeSignedPayload(token, csrf)).toBeUndefined();
   });
 });

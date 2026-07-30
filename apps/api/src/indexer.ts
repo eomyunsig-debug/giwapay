@@ -8,6 +8,7 @@ import pino from 'pino';
 import { createChainClient } from './chain.js';
 import { loadConfig } from './env.js';
 import { ChainIndexer } from './indexer-service.js';
+import { DatabaseMerchantSignerKeyStore } from './signer-key-store.js';
 import { PaymentIntentSigner } from './signer.js';
 import type { AppServices } from './types.js';
 
@@ -19,7 +20,11 @@ const services: AppServices = {
   db: database.db,
   pool: database.pool,
   chainClient: createChainClient(config),
-  intentSigner: new PaymentIntentSigner(config),
+  intentSigner: new PaymentIntentSigner(
+    config,
+    undefined,
+    new DatabaseMerchantSignerKeyStore(database.db),
+  ),
 };
 const lockClient = await database.pool.connect();
 const lockResult = await lockClient.query<{ acquired: boolean }>(

@@ -14,6 +14,20 @@ export const metadata: Metadata = {
     description:
       "A public, non-transactional showcase of GiwaPay's testnet MVP and security boundaries.",
     type: 'website',
+    images: [
+      {
+        url: '/og.png',
+        width: 1200,
+        height: 630,
+        alt: 'GiwaPay — Pay with anything. Settle exactly.',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'GiwaPay — Pay with anything. Settle exactly.',
+    description: 'Public GIWA Sepolia testnet MVP showcase.',
+    images: ['/og.png'],
   },
   icons: {
     icon: '/favicon.svg',
@@ -27,7 +41,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ko">
+    <html lang="en" data-showcase-locale="en" suppressHydrationWarning>
       <body>{children}</body>
     </html>
   );

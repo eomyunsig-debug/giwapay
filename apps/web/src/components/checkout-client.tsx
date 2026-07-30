@@ -21,11 +21,18 @@ import { erc20ApprovalAbi, type PaymentQuote } from '@giwapay/sdk';
 import { Button, Card, DefinitionRow, Divider } from '@giwapay/ui';
 import { giwaPayClient } from '@/lib/api';
 import { getConfiguredToken, transactionExplorerUrl } from '@/lib/config';
-import { formatBasisPoints, formatDateTime, formatRawAmount, shortAddress } from '@/lib/format';
+import {
+  formatBasisPoints,
+  formatDateTime,
+  formatMaximumRawAmount,
+  formatRawAmount,
+  shortAddress,
+} from '@/lib/format';
 import { ensureGiwaWalletClient, sendWalletTransaction } from '@/lib/wallet';
 import { Brand } from './brand';
 import { ErrorState, LoadingState } from './async-state';
-import { LanguageToggle } from './language-toggle';
+import { LanguageToggle, useGiwaPayLocale } from './language-toggle';
+import { ProgressiveDisclosure } from './progressive-disclosure';
 import { StatusBadge } from './status-badge';
 import { TestnetFaucetButton } from './testnet-faucet-button';
 import { WalletButton } from './wallet-button';
@@ -61,6 +68,8 @@ const quoteTermsMatch = (displayed: PaymentQuote, prepared: PaymentQuote) =>
     );
 
 export function CheckoutClient({ id }: { id: string }) {
+  const locale = useGiwaPayLocale();
+  const ko = locale === 'ko';
   const queryClient = useQueryClient();
   const { address, isConnected, chainId } = useAccount();
   const walletClientQuery = useWalletClient({
@@ -108,7 +117,9 @@ export function CheckoutClient({ id }: { id: string }) {
     return (
       <CheckoutFrame>
         <Card className="checkout-main">
-          <LoadingState label="Loading signed PaymentIntent…" />
+          <LoadingState
+            label={ko ? '서명된 결제 요청을 불러오는 중…' : 'Loading signed PaymentIntent…'}
+          />
         </Card>
       </CheckoutFrame>
     );
@@ -118,8 +129,11 @@ export function CheckoutClient({ id }: { id: string }) {
       <CheckoutFrame>
         <Card className="checkout-main">
           <ErrorState
-            title="Checkout unavailable"
-            error={detail.error ?? new Error('PaymentIntent not found')}
+            title={ko ? '결제 페이지를 열 수 없습니다' : 'Checkout unavailable'}
+            error={
+              detail.error ??
+              new Error(ko ? '결제 요청을 찾을 수 없습니다' : 'PaymentIntent not found')
+            }
           />
         </Card>
       </CheckoutFrame>
@@ -136,6 +150,8 @@ export function CheckoutClient({ id }: { id: string }) {
     address &&
     publicClient &&
     quoteValue &&
+    settlementToken &&
+    selectedMetadata &&
     !expired &&
     !verifiedPaid &&
     intent.settlementRecipients.length > 0 &&
@@ -165,14 +181,20 @@ export function CheckoutClient({ id }: { id: string }) {
           prepared.quote,
         );
         setError(
-          'Payment terms changed. Review the refreshed estimate, maximum input, fee, route, and recipients, then click again.',
+          ko
+            ? '결제 조건이 변경되었습니다. 갱신된 예상액, 최대 입력액, 수수료, 경로와 수령인을 확인한 뒤 다시 눌러주세요.'
+            : 'Payment terms changed. Review the refreshed estimate, maximum input, fee, route, and recipients, then click again.',
         );
         setPhase('idle');
         return;
       }
       if (!quoteIsFresh(prepared.quote)) {
         await quote.refetch();
-        setError('The quote expired. Review the refreshed terms and click again.');
+        setError(
+          ko
+            ? '견적이 만료되었습니다. 갱신된 조건을 확인한 뒤 다시 눌러주세요.'
+            : 'The quote expired. Review the refreshed terms and click again.',
+        );
         setPhase('idle');
         return;
       }
@@ -196,7 +218,7 @@ export function CheckoutClient({ id }: { id: string }) {
           confirmations: 1,
         });
         if (approvalReceipt.status !== 'success') {
-          throw new Error('Token approval reverted.');
+          throw new Error(ko ? '토큰 승인이 취소되었습니다.' : 'Token approval reverted.');
         }
       }
 
@@ -214,22 +236,24 @@ export function CheckoutClient({ id }: { id: string }) {
         confirmations: 1,
       });
       if (receipt.status !== 'success') {
-        throw new Error('Payment transaction reverted.');
+        throw new Error(ko ? '결제 거래가 취소되었습니다.' : 'Payment transaction reverted.');
       }
       setPhase('verifying');
       await detail.refetch();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Payment failed');
+      setError(
+        caught instanceof Error ? caught.message : ko ? '결제에 실패했습니다.' : 'Payment failed',
+      );
       setPhase('idle');
     }
   };
 
   const actionLabel: Record<PaymentPhase, string> = {
-    idle: 'Approve & pay',
-    preparing: 'Refreshing live quote…',
-    approving: 'Approve token in wallet…',
-    paying: 'Submit payment in wallet…',
-    verifying: 'Verifying chain event…',
+    idle: ko ? '승인하고 결제' : 'Approve & pay',
+    preparing: ko ? '실시간 견적 갱신 중…' : 'Refreshing live quote…',
+    approving: ko ? '지갑에서 토큰 승인…' : 'Approve token in wallet…',
+    paying: ko ? '지갑에서 결제 제출…' : 'Submit payment in wallet…',
+    verifying: ko ? '체인 이벤트 검증 중…' : 'Verifying chain event…',
   };
 
   return (
@@ -239,7 +263,9 @@ export function CheckoutClient({ id }: { id: string }) {
           {settlementToken?.testOnly || selectableTokens.some((token) => token.testOnly) ? (
             <div className="test-token-banner">
               <Info size={14} />
-              Testnet demo · Mock tokens have no monetary value.
+              {ko
+                ? '테스트넷 데모 · Mock 토큰은 금전적 가치가 없습니다.'
+                : 'Testnet demo · Mock tokens have no monetary value.'}
             </div>
           ) : null}
           <div className="merchant-lockup">
@@ -247,38 +273,67 @@ export function CheckoutClient({ id }: { id: string }) {
               {(intent.merchant?.name ?? 'M').slice(0, 1).toUpperCase()}
             </span>
             <span>
-              <strong>{intent.merchant?.name ?? 'Verified merchant'}</strong>
+              <strong>
+                {intent.merchant?.name ?? (ko ? '검증된 판매자' : 'Verified merchant')}
+              </strong>
               <small>
-                <LockKeyhole size={10} style={{ verticalAlign: '-1px' }} /> Merchant-signed
-                PaymentIntent
+                <LockKeyhole size={10} style={{ verticalAlign: '-1px' }} />{' '}
+                {ko ? '판매자 서명 결제 요청' : 'Merchant-signed PaymentIntent'}
               </small>
             </span>
           </div>
 
-          <p className="checkout-title">Merchant receives exactly</p>
+          <p className="checkout-title">
+            {ko ? '판매자가 정확히 받는 금액' : 'Merchant receives exactly'}
+          </p>
           <p className="checkout-amount">
-            {formatRawAmount(intent.settlement.amount, settlementToken?.decimals ?? 18)}{' '}
+            {settlementToken
+              ? formatRawAmount(intent.settlement.amount, settlementToken.decimals)
+              : ko
+                ? '토큰 정보 없음'
+                : 'Metadata unavailable'}{' '}
             <small>{settlementToken?.symbol ?? shortAddress(intent.settlement.token)}</small>
           </p>
           <p className="checkout-description">{intent.description}</p>
 
           <Divider />
           <p className="gp-label" style={{ marginTop: 19 }}>
-            Choose payment asset
+            {ko ? '결제 자산 선택' : 'Choose payment asset'}
           </p>
           {methods.isLoading ? (
-            <LoadingState label="Loading supported payment assets…" />
+            <LoadingState
+              label={ko ? '지원 결제 자산을 불러오는 중…' : 'Loading supported payment assets…'}
+            />
           ) : methods.error ? (
-            <ErrorState title="Payment method registry unavailable" error={methods.error} />
+            <ErrorState
+              title={
+                ko
+                  ? '결제 수단 레지스트리를 사용할 수 없습니다'
+                  : 'Payment method registry unavailable'
+              }
+              error={methods.error}
+            />
           ) : selectableTokens.length === 0 ? (
             <div className="error-state" role="alert">
               <div>
-                <strong>No verified payment tokens configured</strong>
-                <p>This checkout cannot safely infer token addresses or decimals.</p>
+                <strong>
+                  {ko
+                    ? '검증된 결제 토큰이 설정되지 않았습니다'
+                    : 'No verified payment tokens configured'}
+                </strong>
+                <p>
+                  {ko
+                    ? '이 결제 페이지는 토큰 주소나 소수 자릿수를 임의로 추정하지 않습니다.'
+                    : 'This checkout cannot safely infer token addresses or decimals.'}
+                </p>
               </div>
             </div>
           ) : (
-            <div className="asset-list" role="radiogroup" aria-label="Payment asset">
+            <div
+              className="asset-list"
+              role="radiogroup"
+              aria-label={ko ? '결제 자산' : 'Payment asset'}
+            >
               {selectableTokens.map((token) => {
                 const selected = token.address === selectedToken;
                 return (
@@ -300,7 +355,7 @@ export function CheckoutClient({ id }: { id: string }) {
                       <span className="token-symbol">{token.symbol.slice(0, 1)}</span>
                       <span>
                         <strong>
-                          {token.testOnly ? 'Testnet demo · ' : ''}
+                          {token.testOnly ? (ko ? '테스트넷 데모 · ' : 'Testnet demo · ') : ''}
                           {token.name}
                         </strong>
                         <small>{shortAddress(token.address)}</small>
@@ -308,7 +363,7 @@ export function CheckoutClient({ id }: { id: string }) {
                     </span>
                     <span className="asset-amount">
                       {selected && quote.isFetching ? (
-                        <small>Live quote…</small>
+                        <small>{ko ? '실시간 견적…' : 'Live quote…'}</small>
                       ) : selected && quoteValue ? (
                         <>
                           <strong>
@@ -316,11 +371,12 @@ export function CheckoutClient({ id }: { id: string }) {
                             {token.symbol}
                           </strong>
                           <small>
-                            max {formatRawAmount(quoteValue.maximumInputAmount, token.decimals)}
+                            {ko ? '최대 ' : 'max '}
+                            {formatMaximumRawAmount(quoteValue.maximumInputAmount, token.decimals)}
                           </small>
                         </>
                       ) : (
-                        <small>Select for live quote</small>
+                        <small>{ko ? '선택하여 실시간 견적 확인' : 'Select for live quote'}</small>
                       )}
                     </span>
                   </button>
@@ -345,11 +401,11 @@ export function CheckoutClient({ id }: { id: string }) {
 
         <Card className="checkout-summary">
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <h2>Payment details</h2>
+            <h2>{ko ? '결제 상세' : 'Payment details'}</h2>
             <StatusBadge status={intent.status} />
           </div>
           <div className="summary-total">
-            <span>Estimated input</span>
+            <span>{ko ? '예상 입력액' : 'Estimated input'}</span>
             <strong>
               {quoteValue && selectedMetadata
                 ? `${formatRawAmount(
@@ -359,77 +415,108 @@ export function CheckoutClient({ id }: { id: string }) {
                 : '—'}
             </strong>
           </div>
-          <dl>
-            <DefinitionRow term="Selected input token">
-              {selectedMetadata && selectedToken ? (
-                <span>
-                  {selectedMetadata.symbol}
-                  <br />
-                  <span className="mono">{selectedToken}</span>
-                </span>
-              ) : (
-                '—'
-              )}
-            </DefinitionRow>
-            <DefinitionRow term="Settlement token">
-              <span>
-                {settlementToken?.symbol ?? 'Token'}
-                <br />
-                <span className="mono">{intent.settlement.token}</span>
-              </span>
-            </DefinitionRow>
-            <DefinitionRow term="Maximum input">
-              {quoteValue && selectedMetadata
-                ? `${formatRawAmount(
-                    quoteValue.maximumInputAmount,
-                    selectedMetadata.decimals,
-                  )} ${selectedMetadata.symbol}`
-                : '—'}
-            </DefinitionRow>
-            <DefinitionRow term="Slippage">
-              {quoteValue ? formatBasisPoints(quoteValue.slippageBps) : '—'}
-            </DefinitionRow>
-            <DefinitionRow term="Platform fee">
-              {formatRawAmount(intent.platformFee, settlementToken?.decimals ?? 18)}{' '}
-              {settlementToken?.symbol ?? shortAddress(intent.settlement.token)}
-            </DefinitionRow>
-            <DefinitionRow term="Adapter">
-              {quoteValue ? (
-                <>
-                  {quoteValue.adapterIdentifier}
-                  <br />
-                  <span className="mono">
-                    {quoteValue.adapter === zeroAddress ? 'Direct token' : quoteValue.adapter}
-                  </span>
-                </>
-              ) : (
-                '—'
-              )}
-            </DefinitionRow>
-            <DefinitionRow term="Settlement recipient">
-              {(quoteValue?.settlementRecipients ?? intent.settlementRecipients).map((split) => (
-                <span key={split.address} style={{ display: 'block' }}>
-                  <span className="mono">{split.address}</span>
-                  <br />
-                  {formatBasisPoints(split.basisPoints)}
-                </span>
-              ))}
-            </DefinitionRow>
-            <DefinitionRow term="Payment router">
-              <span className="mono">{quoteValue?.router ?? intent.routerAddress}</span>
-            </DefinitionRow>
-            <DefinitionRow term="Approval spender">
-              <span className="mono">{quoteValue?.approvalSpender ?? '—'}</span>
-            </DefinitionRow>
-            <DefinitionRow term="Expires">{formatDateTime(intent.expiresAt)}</DefinitionRow>
+          <dl className="checkout-key-terms">
+            <div>
+              <dt>{ko ? '최대 입력액' : 'Maximum input'}</dt>
+              <dd>
+                {quoteValue && selectedMetadata
+                  ? `${formatMaximumRawAmount(
+                      quoteValue.maximumInputAmount,
+                      selectedMetadata.decimals,
+                    )} ${selectedMetadata.symbol}`
+                  : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt>{ko ? '슬리피지' : 'Slippage'}</dt>
+              <dd>{quoteValue ? formatBasisPoints(quoteValue.slippageBps) : '—'}</dd>
+            </div>
+            <div>
+              <dt>{ko ? '플랫폼 수수료' : 'Platform fee'}</dt>
+              <dd>
+                {settlementToken
+                  ? formatRawAmount(intent.platformFee, settlementToken.decimals)
+                  : ko
+                    ? '토큰 정보 없음'
+                    : 'Metadata unavailable'}{' '}
+                {settlementToken?.symbol ?? shortAddress(intent.settlement.token)}
+              </dd>
+            </div>
+            <div>
+              <dt>{ko ? '만료' : 'Expires'}</dt>
+              <dd>{formatDateTime(intent.expiresAt, ko ? 'ko-KR' : 'en-US')}</dd>
+            </div>
           </dl>
+
+          <ProgressiveDisclosure
+            summary={ko ? '결제 경로 및 검증 정보' : 'Payment route and verification details'}
+            description={
+              ko
+                ? '토큰 주소, 어댑터, 정산 수령인과 승인 대상'
+                : 'Token addresses, adapter, recipients, and approval target'
+            }
+          >
+            <dl className="checkout-technical-terms">
+              <DefinitionRow term={ko ? '선택한 입력 토큰' : 'Selected input token'}>
+                {selectedMetadata && selectedToken ? (
+                  <span>
+                    {selectedMetadata.symbol}
+                    <br />
+                    <span className="mono">{selectedToken}</span>
+                  </span>
+                ) : (
+                  '—'
+                )}
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '정산 토큰' : 'Settlement token'}>
+                <span>
+                  {settlementToken?.symbol ?? 'Token'}
+                  <br />
+                  <span className="mono">{intent.settlement.token}</span>
+                </span>
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '어댑터' : 'Adapter'}>
+                {quoteValue ? (
+                  <>
+                    {quoteValue.adapterIdentifier}
+                    <br />
+                    <span className="mono">
+                      {quoteValue.adapter === zeroAddress
+                        ? ko
+                          ? '직접 토큰 결제'
+                          : 'Direct token'
+                        : quoteValue.adapter}
+                    </span>
+                  </>
+                ) : (
+                  '—'
+                )}
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '정산 수령인' : 'Settlement recipient'}>
+                {(quoteValue?.settlementRecipients ?? intent.settlementRecipients).map((split) => (
+                  <span key={split.address} style={{ display: 'block' }}>
+                    <span className="mono">{split.address}</span>
+                    <br />
+                    {formatBasisPoints(split.basisPoints)}
+                  </span>
+                ))}
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '결제 라우터' : 'Payment router'}>
+                <span className="mono">{quoteValue?.router ?? intent.routerAddress}</span>
+              </DefinitionRow>
+              <DefinitionRow term={ko ? '승인 대상' : 'Approval spender'}>
+                <span className="mono">{quoteValue?.approvalSpender ?? '—'}</span>
+              </DefinitionRow>
+            </dl>
+          </ProgressiveDisclosure>
 
           {submittedHash && !verifiedPaid ? (
             <div className="info-banner" role="status">
               <ShieldCheck size={16} />
               <span>
-                Transaction submitted, but payment is not yet marked successful. Waiting for the
-                independent indexer.{' '}
+                {ko
+                  ? '거래가 제출되었지만 아직 결제 성공으로 처리되지 않았습니다. 독립 인덱서 검증을 기다리는 중입니다. '
+                  : 'Transaction submitted, but payment is not yet marked successful. Waiting for the independent indexer. '}
                 {submittedExplorerUrl ? (
                   <a
                     className="explorer-link"
@@ -437,11 +524,12 @@ export function CheckoutClient({ id }: { id: string }) {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Explorer <ExternalLink size={11} />
+                    {ko ? '탐색기' : 'Explorer'} <ExternalLink size={11} />
                   </a>
                 ) : (
                   <span className="mono">
-                    Local Anvil transaction {shortAddress(submittedHash)}
+                    {ko ? '로컬 Anvil 거래' : 'Local Anvil transaction'}{' '}
+                    {shortAddress(submittedHash)}
                   </span>
                 )}
               </span>
@@ -459,7 +547,7 @@ export function CheckoutClient({ id }: { id: string }) {
               className="gp-button gp-button--primary gp-button--lg checkout-submit"
               href={`/receipt/${encodeURIComponent(intent.id)}`}
             >
-              <Check size={16} /> View verified receipt
+              <Check size={16} /> {ko ? '검증된 영수증 보기' : 'View verified receipt'}
             </Link>
           ) : !isConnected ? (
             <div style={{ marginTop: 18 }}>
@@ -474,14 +562,18 @@ export function CheckoutClient({ id }: { id: string }) {
               loading={phase !== 'idle'}
             >
               {phase === 'idle' && chainId !== GIWA_SEPOLIA_CHAIN_ID
-                ? 'Switch to GIWA & pay'
+                ? ko
+                  ? 'GIWA로 전환하고 결제'
+                  : 'Switch to GIWA & pay'
                 : actionLabel[phase]}
               {phase === 'idle' ? <ArrowRight size={16} /> : null}
             </Button>
           )}
           <p className="checkout-disclaimer">
-            <Wallet size={10} /> GiwaPay never takes custody between transactions. A wallet
-            submission is not a successful payment until the chain event is independently verified.
+            <Wallet size={10} />{' '}
+            {ko
+              ? 'GiwaPay는 자금을 보관하지 않으며, 결제는 온체인 검증 후 확정됩니다.'
+              : 'GiwaPay never holds funds. Payment completes after onchain verification.'}
           </p>
         </Card>
       </div>

@@ -1,10 +1,25 @@
-import { and, apiKeys, authNonces, eq, gt, isNull, merchants, sessions } from '@giwapay/db';
+import {
+  and,
+  apiKeys,
+  authNonces,
+  eq,
+  gt,
+  isNull,
+  lt,
+  merchants,
+  ne,
+  or,
+  sessions,
+} from '@giwapay/db';
 import type { FastifyInstance, FastifyRequest, preHandlerHookHandler } from 'fastify';
 import { SiweMessage } from 'siwe';
-import { getAddress } from 'viem';
+import { getAddress, type Address } from 'viem';
 import { z } from 'zod';
 
 import { randomSiweNonce, randomToken, safeSecretEqual, secretDigest } from './crypto.js';
+import { merchantRegistryAbi, zeroAddress } from './abi.js';
+import { AsyncTtlCache } from './cache.js';
+import { normalizeAddress } from './chain.js';
 import { HttpError } from './errors.js';
 import { requireAllowedOrigin } from './http-security.js';
 import type { AppServices, AuthPrincipal } from './types.js';
@@ -23,6 +38,10 @@ const verifyBody = z.object({
 const sessionCookie = 'giwapay_session';
 const csrfCookie = 'giwapay_csrf';
 const siweStatement = 'Sign in to GiwaPay. This does not submit a transaction.';
+const adminIdentityCaches = new WeakMap<
+  object,
+  AsyncTtlCache<{ merchantAddress: Address; registered: boolean }>
+>();
 
 function sessionCookieOptions(services: AppServices, httpOnly: boolean) {
   return {
@@ -35,6 +54,86 @@ function sessionCookieOptions(services: AppServices, httpOnly: boolean) {
       ? { domain: services.config.SESSION_COOKIE_DOMAIN }
       : {}),
   };
+}
+
+async function loadAdminMerchantIdentity(
+  services: AppServices,
+  adminAddress: Address,
+): Promise<{ merchantAddress: Address; registered: boolean }> {
+  const registry = services.config.MERCHANT_REGISTRY_ADDRESS;
+  if (!registry) {
+    return { merchantAddress: normalizeAddress(adminAddress), registered: false };
+  }
+  try {
+    const head = await services.chainClient.getBlockNumber();
+    const confirmations = BigInt(services.config.CHAIN_CONFIRMATIONS);
+    if (head < confirmations) throw new Error('Insufficient confirmed blocks');
+    const blockNumber = head - confirmations;
+    const merchantAddress = normalizeAddress(
+      await services.chainClient.readContract({
+        address: registry,
+        abi: merchantRegistryAbi,
+        functionName: 'merchantForAdmin',
+        args: [adminAddress],
+        blockNumber,
+      }),
+    );
+    if (merchantAddress !== zeroAddress) {
+      return { merchantAddress, registered: true };
+    }
+    const record = await services.chainClient.readContract({
+      address: registry,
+      abi: merchantRegistryAbi,
+      functionName: 'getMerchant',
+      args: [adminAddress],
+      blockNumber,
+    });
+    if (record.admin !== zeroAddress && normalizeAddress(record.admin) !== adminAddress) {
+      throw new HttpError(
+        403,
+        'merchant_admin_rotated',
+        'This wallet no longer administers the registered merchant',
+      );
+    }
+    return {
+      merchantAddress: normalizeAddress(adminAddress),
+      registered: record.admin !== zeroAddress,
+    };
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(
+      503,
+      'merchant_identity_unavailable',
+      'Current merchant admin authority could not be verified on-chain',
+      { cause: error },
+    );
+  }
+}
+
+async function readAdminMerchantIdentity(
+  services: AppServices,
+  adminAddress: Address,
+  fresh = false,
+) {
+  if (fresh) return loadAdminMerchantIdentity(services, adminAddress);
+  let cache = adminIdentityCaches.get(services.chainClient);
+  if (!cache) {
+    cache = new AsyncTtlCache(1_000);
+    adminIdentityCaches.set(services.chainClient, cache);
+  }
+  return cache.get(adminAddress, services.config.CHAIN_READ_CACHE_TTL_MS, () =>
+    loadAdminMerchantIdentity(services, adminAddress),
+  );
+}
+
+async function assertCurrentSessionAdmin(
+  services: AppServices,
+  merchant: typeof merchants.$inferSelect,
+  walletAddress: string,
+) {
+  if (walletAddress !== merchant.adminAddress) return false;
+  const identity = await readAdminMerchantIdentity(services, walletAddress as Address);
+  return !identity.registered || identity.merchantAddress === merchant.onchainMerchantAddress;
 }
 
 export async function resolvePrincipal(
@@ -68,7 +167,18 @@ export async function resolvePrincipal(
       .where(eq(merchants.id, key.merchantId))
       .limit(1);
     if (!merchant) return undefined;
-    await services.db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, key.id));
+    const lastUsedWriteCutoff = new Date(
+      Date.now() - services.config.API_KEY_LAST_USED_WRITE_INTERVAL_MS,
+    );
+    await services.db
+      .update(apiKeys)
+      .set({ lastUsedAt: new Date() })
+      .where(
+        and(
+          eq(apiKeys.id, key.id),
+          or(isNull(apiKeys.lastUsedAt), lt(apiKeys.lastUsedAt, lastUsedWriteCutoff)),
+        ),
+      );
     return {
       merchantId: merchant.id,
       merchant,
@@ -80,7 +190,7 @@ export async function resolvePrincipal(
 
   const token = request.cookies[sessionCookie];
   if (!token) return undefined;
-  const tokenHash = secretDigest(token, services.config.SESSION_SECRET);
+  const tokenHash = secretDigest(token, services.config.sessionSecrets.sessionToken);
   const [session] = await services.db
     .select()
     .from(sessions)
@@ -99,6 +209,13 @@ export async function resolvePrincipal(
     .where(eq(merchants.id, session.merchantId))
     .limit(1);
   if (!merchant) return undefined;
+  if (!(await assertCurrentSessionAdmin(services, merchant, session.walletAddress))) {
+    await services.db
+      .update(sessions)
+      .set({ revokedAt: new Date() })
+      .where(eq(sessions.id, session.id));
+    return undefined;
+  }
   return {
     merchantId: merchant.id,
     merchant,
@@ -138,7 +255,7 @@ export function protectMutation(services: AppServices): preHandlerHookHandler {
       .from(sessions)
       .where(eq(sessions.id, principal.sessionId))
       .limit(1);
-    if (!session || !safeSecretEqual(csrf, session.csrfHash, services.config.SESSION_SECRET)) {
+    if (!session || !safeSecretEqual(csrf, session.csrfHash, services.config.sessionSecrets.csrf)) {
       throw new HttpError(403, 'csrf_invalid', 'CSRF token is invalid');
     }
   };
@@ -165,7 +282,7 @@ export async function registerAuthRoutes(app: FastifyInstance, services: AppServ
         issuedAt.getTime() + services.config.SIWE_NONCE_TTL_SECONDS * 1_000,
       );
       await services.db.insert(authNonces).values({
-        nonceHash: secretDigest(nonce, services.config.SESSION_SECRET),
+        nonceHash: secretDigest(nonce, services.config.sessionSecrets.siweNonce),
         walletAddress: body.address,
         domain: parsedOrigin.host,
         uri: parsedOrigin.origin,
@@ -205,7 +322,7 @@ export async function registerAuthRoutes(app: FastifyInstance, services: AppServ
         throw new HttpError(400, 'siwe_message_invalid', 'SIWE message is invalid');
       }
       const normalizedAddress = getAddress(message.address).toLowerCase();
-      const nonceHash = secretDigest(message.nonce, services.config.SESSION_SECRET);
+      const nonceHash = secretDigest(message.nonce, services.config.sessionSecrets.siweNonce);
       const [nonce] = await services.db
         .select()
         .from(authNonces)
@@ -256,8 +373,24 @@ export async function registerAuthRoutes(app: FastifyInstance, services: AppServ
         verified = false;
       }
       if (!verified) {
+        try {
+          verified = await services.chainClient.verifyMessage({
+            address: normalizedAddress as Address,
+            message: body.message,
+            signature: body.signature as `0x${string}`,
+          });
+        } catch {
+          verified = false;
+        }
+      }
+      if (!verified) {
         throw new HttpError(401, 'siwe_signature_invalid', 'SIWE signature is invalid');
       }
+      const identity = await readAdminMerchantIdentity(
+        services,
+        normalizedAddress as Address,
+        true,
+      );
       const consumed = await services.db
         .update(authNonces)
         .set({ usedAt: new Date() })
@@ -267,34 +400,74 @@ export async function registerAuthRoutes(app: FastifyInstance, services: AppServ
         throw new HttpError(409, 'siwe_nonce_replayed', 'SIWE nonce was already consumed');
       }
 
-      const [merchant] = await services.db
-        .insert(merchants)
-        .values({
-          adminAddress: normalizedAddress,
-          payoutAddress: normalizedAddress,
-          settings: { displayName: 'New merchant' },
-        })
-        .onConflictDoUpdate({
-          target: merchants.adminAddress,
-          set: { updatedAt: new Date() },
-        })
-        .returning();
-      if (!merchant) {
-        throw new Error('Merchant upsert did not return a row');
-      }
-
       const sessionToken = randomToken();
       const csrfToken = randomToken();
-      const [session] = await services.db
-        .insert(sessions)
-        .values({
-          merchantId: merchant.id,
-          tokenHash: secretDigest(sessionToken, services.config.SESSION_SECRET),
-          csrfHash: secretDigest(csrfToken, services.config.SESSION_SECRET),
-          expiresAt: new Date(Date.now() + services.config.SESSION_TTL_SECONDS * 1_000),
-        })
-        .returning({ id: sessions.id });
-      if (!session) throw new Error('Session insert did not return a row');
+      const merchant = await services.db.transaction(async (tx) => {
+        const [byIdentity] = await tx
+          .select()
+          .from(merchants)
+          .where(eq(merchants.onchainMerchantAddress, identity.merchantAddress))
+          .limit(1);
+        const [byAdmin] = await tx
+          .select()
+          .from(merchants)
+          .where(eq(merchants.adminAddress, normalizedAddress))
+          .limit(1);
+        if (byAdmin && byIdentity && byAdmin.id !== byIdentity.id) {
+          throw new HttpError(
+            409,
+            'merchant_identity_conflict',
+            'This wallet already belongs to a different merchant record',
+          );
+        }
+        let current = byIdentity ?? byAdmin;
+        if (current && current.onchainMerchantAddress !== identity.merchantAddress) {
+          throw new HttpError(
+            409,
+            'merchant_identity_conflict',
+            'This wallet already belongs to a different merchant record',
+          );
+        }
+        if (!current) {
+          [current] = await tx
+            .insert(merchants)
+            .values({
+              onchainMerchantAddress: identity.merchantAddress,
+              adminAddress: normalizedAddress,
+              payoutAddress: normalizedAddress,
+              settings: { displayName: 'New merchant' },
+            })
+            .returning();
+        } else if (current.adminAddress !== normalizedAddress) {
+          await tx
+            .update(sessions)
+            .set({ revokedAt: new Date() })
+            .where(
+              and(
+                eq(sessions.merchantId, current.id),
+                ne(sessions.walletAddress, normalizedAddress),
+              ),
+            );
+          [current] = await tx
+            .update(merchants)
+            .set({ adminAddress: normalizedAddress, updatedAt: new Date() })
+            .where(eq(merchants.id, current.id))
+            .returning();
+        }
+        if (!current) throw new Error('Merchant upsert did not return a row');
+        const [createdSession] = await tx
+          .insert(sessions)
+          .values({
+            merchantId: current.id,
+            walletAddress: normalizedAddress,
+            tokenHash: secretDigest(sessionToken, services.config.sessionSecrets.sessionToken),
+            csrfHash: secretDigest(csrfToken, services.config.sessionSecrets.csrf),
+            expiresAt: new Date(Date.now() + services.config.SESSION_TTL_SECONDS * 1_000),
+          })
+          .returning({ id: sessions.id });
+        if (!createdSession) throw new Error('Session insert did not return a row');
+        return current;
+      });
 
       reply.setCookie(sessionCookie, sessionToken, sessionCookieOptions(services, true));
       reply.setCookie(csrfCookie, csrfToken, sessionCookieOptions(services, false));
@@ -328,6 +501,7 @@ export async function registerAuthRoutes(app: FastifyInstance, services: AppServ
 export function serializeMerchant(merchant: typeof merchants.$inferSelect) {
   return {
     id: merchant.id,
+    onchainMerchantAddress: merchant.onchainMerchantAddress,
     adminAddress: merchant.adminAddress,
     payoutAddress: merchant.payoutAddress,
     delegatedSignerAddress: merchant.delegatedSignerAddress,

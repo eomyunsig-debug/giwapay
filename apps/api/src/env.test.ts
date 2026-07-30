@@ -19,6 +19,14 @@ describe('configuration', () => {
     expect(loadConfig(base).GIWA_CHAIN_ID).toBe(91_342);
   });
 
+  it('hides API documentation by default in production and permits explicit exposure', () => {
+    expect(loadConfig({ ...base, NODE_ENV: 'production' }).exposeApiDocs).toBe(false);
+    expect(
+      loadConfig({ ...base, NODE_ENV: 'production', EXPOSE_API_DOCS: 'true' }).exposeApiDocs,
+    ).toBe(true);
+    expect(loadConfig(base).exposeApiDocs).toBe(true);
+  });
+
   it('fails when the webhook encryption key is not 32 bytes', () => {
     expect(() => loadConfig({ ...base, WEBHOOK_ENCRYPTION_KEY: 'bad' })).toThrow(/32-byte/);
   });
@@ -57,6 +65,82 @@ describe('configuration', () => {
     expect(() =>
       loadConfig({ ...base, NODE_ENV: 'production', ALLOW_TEST_CONTRACTS: 'true' }),
     ).toThrow(/forbidden in production/);
+  });
+
+  it('forbids extractable shared intent-signing keys in production', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        PAYMENT_INTENT_SIGNER_PRIVATE_KEY: `0x${'11'.repeat(32)}`,
+      }),
+    ).toThrow(/development-only/);
+  });
+
+  it('requires distinct per-merchant KMS handles, a region, and a dedicated readiness key', () => {
+    const keys = [
+      {
+        merchant: `0x${'11'.repeat(20)}`,
+        provider: 'aws-kms',
+        keyId: 'alias/giwapay-merchant-a',
+        address: `0x${'aa'.repeat(20)}`,
+      },
+      {
+        merchant: `0x${'22'.repeat(20)}`,
+        provider: 'aws-kms',
+        keyId: 'alias/giwapay-merchant-a',
+        address: `0x${'bb'.repeat(20)}`,
+      },
+    ];
+    expect(() =>
+      loadConfig({
+        ...base,
+        AWS_REGION: 'ap-northeast-2',
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys),
+      }),
+    ).toThrow(/must not be shared/);
+    expect(() =>
+      loadConfig({
+        ...base,
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys.slice(0, 1)),
+      }),
+    ).toThrow(/AWS_REGION/);
+    expect(() =>
+      loadConfig({
+        ...base,
+        AWS_REGION: 'ap-northeast-2',
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys.slice(0, 1)),
+      }),
+    ).toThrow(/AWS_KMS_READINESS_KEY_ID/);
+    expect(() =>
+      loadConfig({
+        ...base,
+        AWS_REGION: 'ap-northeast-2',
+        AWS_KMS_READINESS_KEY_ID: keys[0]!.keyId,
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify(keys.slice(0, 1)),
+      }),
+    ).toThrow(/must not reuse/);
+  });
+
+  it('defaults production signer mappings to PostgreSQL and keeps env mappings explicit', () => {
+    expect(loadConfig({ ...base, NODE_ENV: 'production' }).paymentIntentSignerSource).toBe(
+      'database',
+    );
+    expect(loadConfig(base).paymentIntentSignerSource).toBe('environment');
+    expect(() =>
+      loadConfig({
+        ...base,
+        PAYMENT_INTENT_SIGNER_SOURCE: 'database',
+        PAYMENT_INTENT_SIGNER_KEYS_JSON: JSON.stringify([
+          {
+            merchant: `0x${'11'.repeat(20)}`,
+            provider: 'aws-kms',
+            keyId: 'alias/giwapay-legacy',
+            address: `0x${'aa'.repeat(20)}`,
+          },
+        ]),
+      }),
+    ).toThrow(/requires PAYMENT_INTENT_SIGNER_SOURCE=environment/);
   });
 
   it('rejects chain-bound configuration outside uint256 and token decimals above 36', () => {

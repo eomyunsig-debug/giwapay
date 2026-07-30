@@ -7,17 +7,36 @@ Run these as separately supervised services:
 - `@giwapay/api start:server`
 - `@giwapay/api start:indexer`
 - `@giwapay/api start:webhooks`
+- `@giwapay/api start:retention`
 
-Apply reviewed migrations once before starting a new application release. The
-checked-in `0000_initial.sql` is only for a fresh, empty database; it is not an
-upgrade for retained or hand-created schemas. All processes use PostgreSQL;
-Redis is not required.
+Apply reviewed migrations once before starting a new application release.
+`0000_initial.sql` is only the fresh-database baseline; later numbered files
+are the ordered upgrade path. Never apply the baseline to a retained or
+hand-created schema. All processes use PostgreSQL; Redis is not required.
+
+The retention worker deletes expired/used authentication material, expired or
+revoked sessions, terminal webhook history older than the configured window,
+chain-block rows older than the reorg/finality safety floor, and expired
+distributed request-limit buckets. It never
+deletes a webhook event with a pending/retry/processing delivery. Configure
+`AUTH_RETENTION_DAYS`, `WEBHOOK_RETENTION_DAYS`, and
+`RETENTION_BATCH_SIZE` according to policy and backup requirements.
 
 ## Health
 
 - `/health` proves only that the API process is alive.
 - `/ready` must report database, chain ID, contract configuration, signer, and
   adapter dependencies as ready before traffic.
+- KMS readiness performs one `DescribeKey` against the dedicated
+  `AWS_KMS_READINESS_KEY_ID`, regardless of merchant count. Successful probes
+  are cached for 30 seconds and failures for 3 seconds so a KMS incident cannot
+  turn a frequent readiness probe into unbounded request fanout. Readiness,
+  onboarding verification, and signing KMS requests share the bounded
+  `AWS_KMS_TIMEOUT_MS`. Database-source readiness also performs one table probe
+  so a missing signer-key migration cannot accept traffic.
+- Per-merchant `GetPublicKey` and Ethereum-address verification runs during
+  registration verification and API-key onboarding. A bad merchant key fails
+  that merchant closed without removing the entire API replica from service.
 
 Alert on:
 
@@ -43,7 +62,8 @@ Restore drills must verify:
 2. cursor and stored block hashes;
 3. chain-event uniqueness;
 4. PaymentIntent/refund projections;
-5. encrypted webhook secrets with the original encryption key.
+5. stable merchant-to-KMS key-ID/public-address mappings;
+6. encrypted webhook secrets with the original encryption key.
 
 If the projection is lost, stop webhook delivery, restore or rebuild from the
 reviewed `CHAIN_START_BLOCK`, compare event counts, and only then resume.
@@ -55,9 +75,30 @@ changing it without migration makes endpoints unusable.
 - Merchant admins rotate/revoke delegated signers on-chain. Pending signatures
   from the old signer fail at the router.
 - API keys are independently revocable and should be scoped and short-lived.
-- Session/API pepper changes revoke existing material.
-- PaymentIntent signer rotation requires every merchant to register the new
-  address before the service signs new intents.
+- `SESSION_SECRET` is expanded with HKDF into separate session-token, CSRF,
+  SIWE-nonce, and quote-envelope keys. Rotating it revokes outstanding browser
+  sessions, nonces, and quotes.
+- Production PaymentIntent signing uses one non-exportable AWS KMS
+  `ECC_SECG_P256K1` key per merchant. `PAYMENT_INTENT_SIGNER_SOURCE=database`
+  stores each stable merchant's KMS key ID and derived Ethereum address in
+  `merchant_signer_keys`. Key IDs and public addresses are not secrets; no
+  private key material enters PostgreSQL. Unique constraints prevent key or
+  signer-address reuse across merchants.
+- `PAYMENT_INTENT_SIGNER_KEYS_JSON` is retained only for explicit
+  `PAYMENT_INTENT_SIGNER_SOURCE=environment` compatibility. Production defaults
+  to the database source and must not use a growing environment-variable map.
+- `AWS_KMS_READINESS_KEY_ID` identifies a dedicated enabled
+  `ECC_SECG_P256K1` probe key. Grant the API `kms:DescribeKey` for this key;
+  do not reuse a merchant signing key or include it in
+  `PAYMENT_INTENT_SIGNER_KEYS_JSON`.
+- Rotate one merchant at a time: provision the replacement KMS key, verify its
+  derived address, have the merchant rotate the delegated signer on-chain,
+  update the merchant's configured key binding, then call registration
+  verification and create a scoped API key before disabling the old KMS key.
+  `/ready` verifies only the dedicated KMS probe, not every merchant binding.
+  Never reuse a KMS key between merchants.
+- `PAYMENT_INTENT_SIGNER_PRIVATE_KEY` is retained only for local/testnet demo
+  workflows and is rejected when `NODE_ENV=production`.
 - Contract owner/adapter-manager transfer uses the on-chain two-step flow and
   must be verified before the old operator relinquishes access. On
   `AdapterRegistry.acceptOwnership`, the contract automatically revokes any
@@ -66,12 +107,39 @@ changing it without migration makes endpoints unusable.
 
 Never log, paste into tickets, or commit the material itself.
 
+### Provision a merchant KMS mapping
+
+The merchant must sign in once so its stable merchant row exists. The
+provisioning command accepts only a merchant address and non-secret KMS key
+identifier. It calls `GetPublicKey`, derives the Ethereum address itself, and
+writes the mapping only after validating `ECC_SECG_P256K1` and `SIGN_VERIFY`.
+It also resolves the readiness key and rejects reuse even when different aliases
+point to the same underlying KMS key.
+Run the command with an operator-scoped `DATABASE_URL` that can write
+`merchant_signer_keys`; the long-running API role should have `SELECT` only on
+that table.
+
+```bash
+PAYMENT_INTENT_SIGNER_SOURCE=database \
+pnpm --filter @giwapay/api signer:provision -- \
+  --merchant 0x0000000000000000000000000000000000000001 \
+  --key-id alias/giwapay-merchant-example
+```
+
+An existing mapping is not overwritten unless the operator adds `--replace`.
+Use that flag only during a reviewed rotation after recording the derived
+address for the merchant's on-chain signer transaction. API replicas cache
+lookups for `PAYMENT_INTENT_SIGNER_CACHE_TTL_MS` (five seconds by default), so
+allow that interval before testing the new mapping. The command never accepts
+or prints private key material.
+
 ## Incident controls
 
 - **Suspicious adapter:** adapter manager disables it; router owner may pause
   new payments. Refunds remain available.
-- **Delegated signer leak:** merchants revoke/rotate it; stop API signing; do
-  not alter payout/splits.
+- **Delegated signer leak:** disable the affected merchant's KMS key, stop API
+  signing for that merchant, and have its admin revoke/rotate the signer
+  on-chain. Do not alter payout/splits.
 - **RPC disagreement:** fail readiness and signing/quotes; compare independent
   providers and stored block hashes.
 - **Webhook compromise:** disable endpoint, rotate its secret by creating a new

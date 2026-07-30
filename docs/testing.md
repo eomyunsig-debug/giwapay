@@ -114,7 +114,8 @@ A testnet release is accepted only when:
    Foundry fuzz/invariants, and static analysis pass;
 3. migrations apply to an empty database;
 4. `/ready` verifies database, chain ID, router/registry/fee configuration, and
-   delegated signer availability;
+   the dedicated KMS reachability probe; merchant onboarding separately verifies
+   the configured delegated signer key and Ethereum address;
 5. deployment manifest addresses, runtime code, constructor terms, block/tx
    hashes, explorer verification, and source commit are reviewed;
 6. an operator completes payment, webhook, partial refund, full refund, restart,

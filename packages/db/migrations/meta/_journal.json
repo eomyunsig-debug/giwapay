@@ -8,6 +8,27 @@
       "when": 1785180000000,
       "tag": "0000_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785220200000,
+      "tag": "0001_stable_merchant_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785223800000,
+      "tag": "0002_distributed_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785286800000,
+      "tag": "0003_merchant_signer_keys",
+      "breakpoints": true
     }
   ]
 }

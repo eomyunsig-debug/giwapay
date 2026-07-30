@@ -1,13 +1,19 @@
-import { and, apiKeys, desc, eq, merchants } from '@giwapay/db';
+import { and, apiKeys, desc, eq, merchants, ne, sessions } from '@giwapay/db';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import { merchantRegistryAbi, zeroAddress } from '../abi.js';
 import { authenticate, protectMutation, serializeMerchant } from '../auth.js';
+import { AsyncTtlCache } from '../cache.js';
 import { randomToken, secretDigest } from '../crypto.js';
 import { HttpError } from '../errors.js';
 import { normalizeAddress } from '../chain.js';
 import type { AppServices } from '../types.js';
+
+const merchantRegistrationCaches = new WeakMap<
+  object,
+  AsyncTtlCache<typeof merchants.$inferSelect>
+>();
 
 const updateMerchantBody = z.object({
   displayName: z.string().trim().min(1).max(100),
@@ -65,9 +71,12 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
     async (request) => {
       const principal = request.principal;
       if (!principal) throw new Error('Authentication pre-handler did not run');
+      const requiredDelegatedSignerAddress = await services.intentSigner.addressForMerchant(
+        principal.merchant,
+      );
       return {
         merchant: serializeMerchant(principal.merchant),
-        requiredDelegatedSignerAddress: services.intentSigner.address ?? null,
+        requiredDelegatedSignerAddress: requiredDelegatedSignerAddress ?? null,
       };
     },
   );
@@ -117,6 +126,7 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
       const principal = request.principal;
       if (!principal) throw new Error('Authentication pre-handler did not run');
       const merchant = await refreshMerchantRegistration(services, principal.merchant);
+      await services.intentSigner.verifyMerchantSigner(merchant);
       return { merchant: serializeMerchant(merchant) };
     },
   );
@@ -201,6 +211,7 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
           'This API key secret was already issued and cannot be replayed; use a new idempotency key',
         );
       }
+      await services.intentSigner.verifyMerchantSigner(verifiedMerchant);
       const rawKey = `gwp_test_${randomToken(32)}`;
       const [key] = await services.db
         .insert(apiKeys)
@@ -256,9 +267,10 @@ export async function registerMerchantRoutes(app: FastifyInstance, services: App
   );
 }
 
-export async function refreshMerchantRegistration(
+async function loadMerchantRegistration(
   services: AppServices,
   merchant: typeof merchants.$inferSelect,
+  blockNumber: bigint,
 ) {
   const registryAddress = services.config.MERCHANT_REGISTRY_ADDRESS;
   if (!registryAddress) {
@@ -274,17 +286,12 @@ export async function refreshMerchantRegistration(
     updatedAt: bigint;
   };
   try {
-    const head = await services.chainClient.getBlockNumber();
-    const confirmations = BigInt(services.config.CHAIN_CONFIRMATIONS);
-    if (head < confirmations) {
-      throw new Error('Chain has insufficient confirmed blocks');
-    }
     config = await services.chainClient.readContract({
       address: registryAddress,
       abi: merchantRegistryAbi,
       functionName: 'getMerchant',
-      args: [merchant.adminAddress as `0x${string}`],
-      blockNumber: head - confirmations,
+      args: [merchant.onchainMerchantAddress as `0x${string}`],
+      blockNumber,
     });
   } catch {
     throw new HttpError(
@@ -293,27 +300,94 @@ export async function refreshMerchantRegistration(
       'MerchantRegistry could not be verified',
     );
   }
-  if (normalizeAddress(config.admin) !== merchant.adminAddress || config.createdAt === 0n) {
+  if (config.admin === zeroAddress || config.createdAt === 0n) {
     throw new HttpError(
       409,
       'merchant_not_registered',
       'The wallet is not registered in MerchantRegistry',
     );
   }
-  const [updated] = await services.db
-    .update(merchants)
-    .set({
-      payoutAddress: normalizeAddress(config.payoutAddress),
-      delegatedSignerAddress:
-        config.delegatedSigner === zeroAddress ? null : normalizeAddress(config.delegatedSigner),
-      refundOperatorAddress:
-        config.refundOperator === zeroAddress ? null : normalizeAddress(config.refundOperator),
-      status: config.active ? 'active' : 'paused',
-      onchainRegisteredAt: new Date(Number(config.createdAt) * 1_000),
-      updatedAt: new Date(),
-    })
-    .where(eq(merchants.id, merchant.id))
-    .returning();
+  const currentAdmin = normalizeAddress(config.admin);
+  const payoutAddress = normalizeAddress(config.payoutAddress);
+  const delegatedSignerAddress =
+    config.delegatedSigner === zeroAddress ? null : normalizeAddress(config.delegatedSigner);
+  const refundOperatorAddress =
+    config.refundOperator === zeroAddress ? null : normalizeAddress(config.refundOperator);
+  const status = config.active ? ('active' as const) : ('paused' as const);
+  const onchainRegisteredAt = new Date(Number(config.createdAt) * 1_000);
+  if (
+    merchant.adminAddress === currentAdmin &&
+    merchant.payoutAddress === payoutAddress &&
+    merchant.delegatedSignerAddress === delegatedSignerAddress &&
+    merchant.refundOperatorAddress === refundOperatorAddress &&
+    merchant.status === status &&
+    merchant.onchainRegisteredAt?.getTime() === onchainRegisteredAt.getTime()
+  ) {
+    return merchant;
+  }
+  const [updated] = await services.db.transaction(async (tx) => {
+    if (currentAdmin !== merchant.adminAddress) {
+      await tx
+        .update(sessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(sessions.merchantId, merchant.id), ne(sessions.walletAddress, currentAdmin)));
+    }
+    return tx
+      .update(merchants)
+      .set({
+        adminAddress: currentAdmin,
+        payoutAddress,
+        delegatedSignerAddress,
+        refundOperatorAddress,
+        status,
+        onchainRegisteredAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(merchants.id, merchant.id))
+      .returning();
+  });
   if (!updated) throw new Error('Merchant synchronization returned no row');
   return updated;
+}
+
+export function refreshMerchantRegistration(
+  services: AppServices,
+  merchant: typeof merchants.$inferSelect,
+): Promise<typeof merchants.$inferSelect> {
+  if (!services.config.MERCHANT_REGISTRY_ADDRESS) {
+    return Promise.reject(
+      new HttpError(503, 'merchant_registry_unavailable', 'MerchantRegistry is not configured'),
+    );
+  }
+  return refreshMerchantRegistrationAtConfirmedHead(services, merchant);
+}
+
+async function refreshMerchantRegistrationAtConfirmedHead(
+  services: AppServices,
+  merchant: typeof merchants.$inferSelect,
+) {
+  let blockNumber: bigint;
+  try {
+    const head = await services.chainClient.getBlockNumber();
+    const confirmations = BigInt(services.config.CHAIN_CONFIRMATIONS);
+    if (head < confirmations) throw new Error('Chain has insufficient confirmed blocks');
+    blockNumber = head - confirmations;
+  } catch (error) {
+    throw new HttpError(
+      503,
+      'merchant_registry_read_failed',
+      'MerchantRegistry could not be verified',
+      { cause: error },
+    );
+  }
+  let cache = merchantRegistrationCaches.get(services.chainClient);
+  if (!cache) {
+    cache = new AsyncTtlCache(10_000);
+    merchantRegistrationCaches.set(services.chainClient, cache);
+  }
+  return cache.get(
+    `${merchant.onchainMerchantAddress}:${blockNumber}`,
+    services.config.CHAIN_READ_CACHE_TTL_MS,
+    () => loadMerchantRegistration(services, merchant, blockNumber),
+  );
 }
