@@ -1,5 +1,9 @@
 # GiwaPay GASOK pitch deck
 
+Status: **pre-deployment draft — do not use as the final form submission until
+the verified contract, exact submitted source commit, and matching successful
+CI run replace the current pending and historical evidence**
+
 `build-deck.mjs` is the editable source for both submission files:
 
 - `GiwaPay-GASOK-Pitch-Deck.pptx`
@@ -16,6 +20,11 @@ The deck intentionally shows the verified GIWA testnet contract as
 GIWA Explorer source verification, and public deployment manifest are real.
 Do not place a private key, keystore, access token, or unreviewed address in
 the deck.
+
+The current generated artifacts also retain historical source-note links to the
+`agent/giwa-program-submission` branch and CI run `30518612814`. Regenerate both
+artifacts with immutable links for the exact submitted commit and its matching
+green CI run before copying the pitch-deck URL into the live form.
 
 The PDF is assembled from the deck's reviewed slide renders so Korean
 typography stays consistent across reviewer environments. Keep the PPTX as the

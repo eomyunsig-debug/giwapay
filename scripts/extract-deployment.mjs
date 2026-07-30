@@ -102,6 +102,10 @@ const sourceCommit = process.env.DEPLOYMENT_SOURCE_COMMIT;
 if (!sourceCommitPattern.test(sourceCommit ?? '')) {
   throw new Error('DEPLOYMENT_SOURCE_COMMIT must be a full 40-character Git commit SHA');
 }
+const evidenceToolingCommit = process.env.DEPLOYMENT_EVIDENCE_TOOLING_COMMIT ?? sourceCommit;
+if (!sourceCommitPattern.test(evidenceToolingCommit)) {
+  throw new Error('DEPLOYMENT_EVIDENCE_TOOLING_COMMIT must be a full 40-character Git commit SHA');
+}
 const broadcastSourceCommit =
   typeof broadcast.commit === 'string' && /^[0-9a-fA-F]{7,40}$/.test(broadcast.commit)
     ? broadcast.commit.toLowerCase()
@@ -382,6 +386,24 @@ const manifestVerificationStatus =
     : verificationStatus === 'verified' || verificationStatus === 'partially-verified'
       ? 'deployment-incomplete'
       : verificationStatus;
+const broadcastArtifactSha256 = createHash('sha256').update(broadcastBytes).digest('hex');
+const previousBroadcastArtifact =
+  previousManifest?.broadcastArtifact?.sha256 === broadcastArtifactSha256
+    ? previousManifest.broadcastArtifact
+    : null;
+const preservedRecoveryProvenance = preserveResumeProvenance(
+  previousBroadcastArtifact,
+  broadcastArtifactSha256,
+  Array.isArray(broadcast.transactions) ? broadcast.transactions.length : 0,
+);
+const requestedResumeAuthorization =
+  parseOptionalBoolean(process.env.DEPLOYMENT_RESUME_AUTHORIZED) ??
+  previousBroadcastArtifact?.resumeAuthorized ??
+  false;
+const resumeAuthorized =
+  deploymentStatus === 'broadcast-partial' &&
+  requestedResumeAuthorization === true &&
+  preservedRecoveryProvenance !== null;
 
 const manifest = {
   schemaVersion: 2,
@@ -391,6 +413,7 @@ const manifest = {
   generatedAt: new Date().toISOString(),
   deploymentStatus,
   sourceCommit: sourceCommit.toLowerCase(),
+  evidenceToolingCommit: evidenceToolingCommit.toLowerCase(),
   deploymentScopeDirty:
     parseOptionalBoolean(process.env.DEPLOYMENT_SCOPE_DIRTY) ??
     previousManifest?.deploymentScopeDirty ??
@@ -401,8 +424,10 @@ const manifest = {
     null,
   broadcastArtifact: {
     fileName: basename(resolvedBroadcastPath),
-    sha256: createHash('sha256').update(broadcastBytes).digest('hex'),
+    sha256: broadcastArtifactSha256,
     sourceCommit: broadcastSourceCommit,
+    resumeAuthorized,
+    ...(preservedRecoveryProvenance ?? {}),
     transactionCount: Array.isArray(broadcast.transactions) ? broadcast.transactions.length : 0,
     receiptCount: receipts.length,
   },
@@ -462,6 +487,44 @@ function parseOptionalBoolean(value) {
   if (value === 'true') return true;
   if (value === 'false') return false;
   throw new Error(`Expected true or false, received ${value}`);
+}
+
+function preserveResumeProvenance(artifact, broadcastSha256, transactionCount) {
+  const digest = /^[0-9a-f]{64}$/;
+  const recovery = artifact?.recoverySidecar;
+  const policy = artifact?.resumePolicy;
+  const journal = artifact?.transitionJournal;
+  const valid =
+    artifact?.sha256 === broadcastSha256 &&
+    recovery?.fileName === `run-${recovery?.sha256}.json` &&
+    digest.test(recovery?.sha256 ?? '') &&
+    recovery?.publicArtifactSha256 === broadcastSha256 &&
+    recovery?.rpcUrlSha256 === policy?.rpcUrlSha256 &&
+    recovery?.storage === 'foundry-cache-private' &&
+    policy?.schemaVersion === 1 &&
+    policy?.kind === 'content-addressed-foundry-sensitive-sequence' &&
+    policy?.forgeVersion === '1.7.1' &&
+    policy?.forgeCommit === '4072e48705af9d93e3c0f6e29e93b5e9a40caed8' &&
+    digest.test(policy?.rpcUrlSha256 ?? '') &&
+    policy?.transactionCount === transactionCount &&
+    policy?.recoverySidecarSha256 === recovery?.sha256 &&
+    /^transition-[0-9a-f]{64}\.json$/.test(journal?.fileName ?? '') &&
+    digest.test(journal?.sha256 ?? '') &&
+    ['deploy', 'resume'].includes(journal?.operation) &&
+    (journal?.previousArtifactSha256 === null ||
+      digest.test(journal?.previousArtifactSha256 ?? '')) &&
+    (journal?.previousRecoverySidecarSha256 === null ||
+      digest.test(journal?.previousRecoverySidecarSha256 ?? '')) &&
+    digest.test(journal?.inflightGuardSha256 ?? '') &&
+    /^[0-9a-fA-F]{40}$/.test(journal?.signingEvidenceToolingCommit ?? '') &&
+    /^[0-9a-fA-F]{40}$/.test(journal?.evidenceToolingCommit ?? '');
+  return valid
+    ? {
+        recoverySidecar: recovery,
+        resumePolicy: policy,
+        transitionJournal: journal,
+      }
+    : null;
 }
 
 function parseOptionalInteger(value, label, minimum, maximum) {

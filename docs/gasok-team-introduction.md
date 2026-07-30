@@ -1,7 +1,8 @@
 # GiwaPay team introduction
 
-Status: **complete the bracketed applicant fields before making this document
-public**
+Status: **public template only — it does not satisfy the GASOK team-introduction
+requirement until every bracketed applicant field is replaced with approved,
+verifiable information**
 
 ## Team
 
