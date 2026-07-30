@@ -20,6 +20,7 @@ const webBaseUrl = 'http://127.0.0.1:3000';
 const manifestPath = resolve(repositoryRoot, 'deployments/local/current.json');
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
 const transactionHashPattern = /^0x[0-9a-fA-F]{64}$/;
+const calldataPattern = /^0x(?:[0-9a-fA-F]{2})+$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const registerMerchantAbi = parseAbi([
   'function registerMerchant(address payoutAddress,address delegatedSigner)',
@@ -431,6 +432,58 @@ async function main() {
     fail('Local API returned an inconsistent PaymentIntent');
   }
 
+  const quoteResponse = await apiJson(
+    `/v1/payment-intents/${encodeURIComponent(intent.id)}/quote?tokenIn=${encodeURIComponent(mockKrw)}&slippageBps=100`,
+  );
+  const quote = quoteResponse.data;
+  if (
+    typeof quote?.quoteId !== 'string' ||
+    quote.quoteId.length < 32 ||
+    quote.tokenIn?.toLowerCase() !== mockKrw.toLowerCase() ||
+    quote.settlementToken?.toLowerCase() !== mockKrw.toLowerCase() ||
+    quote.exactMerchantAmount !== '100000000' ||
+    quote.platformFee !== '500000' ||
+    quote.estimatedInputAmount !== '100500000' ||
+    quote.maximumInputAmount !== '101505000' ||
+    quote.slippageBps !== 100 ||
+    quote.router?.toLowerCase() !== paymentRouter.toLowerCase() ||
+    quote.approvalSpender?.toLowerCase() !== paymentRouter.toLowerCase()
+  ) {
+    fail('Local API returned inconsistent GASOK evidence quote terms');
+  }
+
+  const prepareResponse = await apiJson(
+    `/v1/payment-intents/${encodeURIComponent(intent.id)}/prepare`,
+    {
+      method: 'POST',
+      body: {
+        tokenIn: mockKrw,
+        quoteId: quote.quoteId,
+        slippageBps: 100,
+      },
+    },
+  );
+  const prepared = prepareResponse.data;
+  const approvalCalldata = prepared?.approval?.transaction?.data;
+  const paymentCalldata = prepared?.payment?.transaction?.data;
+  if (
+    prepared?.approval?.required !== true ||
+    prepared.approval.token?.toLowerCase() !== mockKrw.toLowerCase() ||
+    prepared.approval.spender?.toLowerCase() !== paymentRouter.toLowerCase() ||
+    prepared.approval.amount !== quote.maximumInputAmount ||
+    prepared.approval.transaction?.to?.toLowerCase() !== mockKrw.toLowerCase() ||
+    prepared.approval.transaction?.value !== '0' ||
+    typeof approvalCalldata !== 'string' ||
+    !calldataPattern.test(approvalCalldata) ||
+    prepared?.payment?.transaction?.to?.toLowerCase() !== paymentRouter.toLowerCase() ||
+    prepared.payment.transaction.value !== '0' ||
+    prepared.payment.transaction.chainId !== chainId ||
+    typeof paymentCalldata !== 'string' ||
+    !calldataPattern.test(paymentCalldata)
+  ) {
+    fail('Local API returned unsafe or inconsistent prepared transaction calldata');
+  }
+
   await writePublicState(outputPath, {
     version: 1,
     chainId,
@@ -441,6 +494,8 @@ async function main() {
     payerAddress,
     mockKrw,
     paymentRouter,
+    approvalCalldata: approvalCalldata.toLowerCase(),
+    paymentCalldata: paymentCalldata.toLowerCase(),
   });
   globalThis.console.log('Prepared public local-only wallet E2E state.');
 }

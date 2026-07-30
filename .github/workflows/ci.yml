@@ -361,6 +361,6 @@ jobs:
         with:
           name: giwapay-local-wallet-e2e-video-${{ github.sha }}-${{ github.run_attempt }}
           path: apps/web/test-results/wallet-e2e/**/video.webm
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
           compression-level: 0

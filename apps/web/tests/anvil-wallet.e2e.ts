@@ -6,16 +6,22 @@ import { promisify } from 'node:util';
 import { expect, test, type Page } from '@playwright/test';
 import { getAddress, type Address, type Hex } from 'viem';
 
-import { installAnvilEip1193Wallet, readAnvilWalletTransactions } from './anvil-eip1193';
+import {
+  assertAnvilWalletBridgeRejectsUnauthorizedCall,
+  installAnvilEip1193Wallet,
+  readAnvilWalletTransactions,
+} from './anvil-eip1193';
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = resolve(process.cwd(), '../..');
 const expectedStateKeys = [
+  'approvalCalldata',
   'apiBaseUrl',
   'chainId',
   'intentId',
   'mockKrw',
   'payerAddress',
+  'paymentCalldata',
   'paymentRouter',
   'rpcUrl',
   'version',
@@ -35,6 +41,8 @@ interface WalletE2eState {
   payerAddress: Address;
   mockKrw: Address;
   paymentRouter: Address;
+  approvalCalldata: Hex;
+  paymentCalldata: Hex;
 }
 
 interface PublicPaymentRecord {
@@ -82,6 +90,14 @@ function readAddress(record: Record<string, unknown>, key: string): Address {
     invalidState(`${key} must be a non-zero EVM address`);
   }
   return value as Address;
+}
+
+function readCalldata(record: Record<string, unknown>, key: string): Hex {
+  const value = readString(record, key);
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(value)) {
+    invalidState(`${key} must be non-empty canonical hex calldata`);
+  }
+  return value.toLowerCase() as Hex;
 }
 
 function readLoopbackUrl(
@@ -153,6 +169,8 @@ async function loadWalletE2eState(): Promise<WalletE2eState> {
     payerAddress,
     mockKrw,
     paymentRouter,
+    approvalCalldata: readCalldata(parsed, 'approvalCalldata'),
+    paymentCalldata: readCalldata(parsed, 'paymentCalldata'),
   };
 }
 
@@ -273,6 +291,8 @@ test('records one real local wallet payment through canonical indexer verificati
   await installAnvilEip1193Wallet(page, {
     accountIndex: 1,
     allowedTransactionTargets: [state.mockKrw, state.paymentRouter],
+    expectedApprovalData: state.approvalCalldata,
+    expectedPaymentData: state.paymentCalldata,
   });
   await page.addInitScript(() => {
     window.localStorage.setItem('giwapay.locale', 'en');
@@ -282,6 +302,7 @@ test('records one real local wallet payment through canonical indexer verificati
     `${state.webBaseUrl}/checkout/${encodeURIComponent(state.intentId)}`,
   );
   expect(navigation?.ok()).toBe(true);
+  await assertAnvilWalletBridgeRejectsUnauthorizedCall(page);
 
   await expect(page.getByText('GASOK Demo Merchant', { exact: true })).toBeVisible();
   await expect(page.getByText('GASOK verified local payment', { exact: true })).toBeVisible();
@@ -299,10 +320,12 @@ test('records one real local wallet payment through canonical indexer verificati
 
   await page.getByRole('button', { name: 'Connect wallet', exact: true }).click();
   await page.getByRole('button', { name: 'GiwaPay Anvil test wallet', exact: true }).click();
-  await expect(page.locator('.wallet-pill')).toBeVisible();
-  await page.locator('.wallet-pill').click();
-  await expect(page.locator('.wallet-address')).toHaveText(getAddress(state.payerAddress));
-  await page.locator('.wallet-pill').click();
+  const authorizedAccounts = await page.evaluate(async () => {
+    const provider = Reflect.get(window, 'ethereum') as
+      { request: (request: { method: string }) => Promise<unknown> } | undefined;
+    return provider?.request({ method: 'eth_accounts' });
+  });
+  expect(authorizedAccounts).toEqual([state.payerAddress.toLowerCase()]);
   await expect(page.getByRole('button', { name: 'Approve & pay' })).toBeEnabled();
   await paceVideo(page);
 

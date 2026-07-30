@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { Page } from '@playwright/test';
 import type { Address, Hex } from 'viem';
 
@@ -26,6 +28,10 @@ interface InstallAnvilWalletOptions {
    * the selected mock token and the deployed PaymentRouter.
    */
   allowedTransactionTargets: readonly Address[];
+  /** Exact API-prepared calldata permitted for the mock-token approval. */
+  expectedApprovalData: Hex;
+  /** Exact API-prepared calldata permitted for PaymentRouter.pay. */
+  expectedPaymentData: Hex;
 }
 
 export interface InstalledAnvilWallet {
@@ -86,6 +92,11 @@ const normalizeChainId = (value: unknown): bigint | undefined => {
     return undefined;
   }
 };
+
+const normalizeCalldata = (value: unknown): Hex | undefined =>
+  typeof value === 'string' && /^0x(?:[0-9a-fA-F]{2})+$/.test(value)
+    ? (value.toLowerCase() as Hex)
+    : undefined;
 
 const callAnvilRpc = async (method: string, params: readonly unknown[] = []): Promise<unknown> => {
   const url = new URL(ANVIL_WALLET_RPC_URL);
@@ -174,6 +185,22 @@ export async function installAnvilEip1193Wallet(
   }
   const [mockTokenTarget, paymentRouterTarget] = allowedTargets as Address[];
   const targetAllowlist = new Set([mockTokenTarget, paymentRouterTarget]);
+  const expectedApprovalData = normalizeCalldata(options.expectedApprovalData);
+  const expectedPaymentData = normalizeCalldata(options.expectedPaymentData);
+  const expectedApprovalSpender =
+    expectedApprovalData?.startsWith(ERC20_APPROVE_SELECTOR) && expectedApprovalData.length === 138
+      ? normalizeAddress(`0x${expectedApprovalData.slice(34, 74)}`)
+      : undefined;
+  const expectedApprovalAmount = expectedApprovalSpender
+    ? BigInt(`0x${expectedApprovalData!.slice(74, 138)}`)
+    : 0n;
+  if (
+    expectedApprovalSpender !== paymentRouterTarget ||
+    expectedApprovalAmount <= 0n ||
+    !expectedPaymentData?.startsWith(PAYMENT_ROUTER_PAY_SELECTOR)
+  ) {
+    throw new Error('Disposable wallet requires exact safe API-prepared transaction calldata');
+  }
 
   const accounts = await checkedUnlockedAccounts();
   const account = accounts[accountIndex];
@@ -182,11 +209,19 @@ export async function installAnvilEip1193Wallet(
       `Anvil wallet accountIndex ${accountIndex} is unavailable (${accounts.length} accounts)`,
     );
   }
+  const bridgeCapability = randomUUID();
 
   await page.exposeFunction(
     RPC_BINDING_NAME,
-    async (request: { method?: unknown; params?: unknown }): Promise<RpcBridgeResponse> => {
+    async (request: {
+      method?: unknown;
+      params?: unknown;
+      capability?: unknown;
+    }): Promise<RpcBridgeResponse> => {
       try {
+        if (request?.capability !== bridgeCapability) {
+          throw errorWithCode('Disposable payer bridge rejected an unauthorized caller', 4_100);
+        }
         if (request?.method !== 'eth_sendTransaction') {
           throw errorWithCode('Disposable payer permits transaction submission only', 4_200);
         }
@@ -205,9 +240,8 @@ export async function installAnvilEip1193Wallet(
         if (!to || !targetAllowlist.has(to)) {
           throw errorWithCode('Disposable wallet rejected a non-allowlisted target', 4_100);
         }
-        const data =
-          typeof transactionRecord.data === 'string' ? transactionRecord.data.toLowerCase() : '';
-        if (!/^0x[0-9a-f]*$/.test(data)) {
+        const data = normalizeCalldata(transactionRecord.data);
+        if (!data) {
           throw errorWithCode('Disposable wallet requires canonical transaction calldata', 4_100);
         }
         if (to === mockTokenTarget) {
@@ -216,14 +250,21 @@ export async function installAnvilEip1193Wallet(
               ? normalizeAddress(`0x${data.slice(34, 74)}`)
               : undefined;
           const amount = spender ? BigInt(`0x${data.slice(74, 138)}`) : 0n;
-          if (spender !== paymentRouterTarget || amount <= 0n) {
+          if (
+            data !== expectedApprovalData ||
+            spender !== paymentRouterTarget ||
+            amount !== expectedApprovalAmount
+          ) {
             throw errorWithCode(
-              'Disposable wallet permits only a positive token approval to PaymentRouter',
+              'Disposable wallet rejected approval outside exact API-prepared terms',
               4_100,
             );
           }
-        } else if (!data.startsWith(PAYMENT_ROUTER_PAY_SELECTOR)) {
-          throw errorWithCode('Disposable wallet permits only PaymentRouter.pay', 4_100);
+        } else if (data !== expectedPaymentData || !data.startsWith(PAYMENT_ROUTER_PAY_SELECTOR)) {
+          throw errorWithCode(
+            'Disposable wallet rejected payment outside exact API-prepared terms',
+            4_100,
+          );
         }
         if (
           transactionRecord.value !== undefined &&
@@ -259,6 +300,7 @@ export async function installAnvilEip1193Wallet(
     ({
       account: selectedAccount,
       bindingName,
+      bridgeCapability,
       chainId,
       chainIdHex,
       providerInfo,
@@ -266,6 +308,7 @@ export async function installAnvilEip1193Wallet(
     }: {
       account: Address;
       bindingName: string;
+      bridgeCapability: string;
       chainId: number;
       chainIdHex: string;
       providerInfo: typeof ANVIL_WALLET_PROVIDER_INFO;
@@ -279,6 +322,7 @@ export async function installAnvilEip1193Wallet(
       type BrowserRpcBridge = (request: {
         method: string;
         params?: readonly unknown[];
+        capability: string;
       }) => Promise<RpcBridgeResponse>;
 
       class ProviderRpcError extends Error {
@@ -345,7 +389,17 @@ export async function installAnvilEip1193Wallet(
               emit('chainChanged', chainIdHex);
               return null;
             case 'eth_sendTransaction': {
-              const response = await bridge({ method, params: arrayParams });
+              if (!authorized) {
+                throw new ProviderRpcError({
+                  code: 4_100,
+                  message: 'Authorize the disposable payer before submitting transactions',
+                });
+              }
+              const response = await bridge({
+                method,
+                params: arrayParams,
+                capability: bridgeCapability,
+              });
               if (!response.ok) throw new ProviderRpcError(response.error);
               records.push(Object.freeze({ to: response.to, hash: response.hash }));
               return response.hash;
@@ -402,6 +456,7 @@ export async function installAnvilEip1193Wallet(
     {
       account,
       bindingName: RPC_BINDING_NAME,
+      bridgeCapability,
       chainId: ANVIL_WALLET_CHAIN_ID,
       chainIdHex: ANVIL_WALLET_CHAIN_ID_HEX,
       providerInfo: ANVIL_WALLET_PROVIDER_INFO,
@@ -440,4 +495,22 @@ export async function readAnvilWalletTransactions(
     to: String((record as Record<string, unknown>).to).toLowerCase() as Address,
     hash: String((record as Record<string, unknown>).hash).toLowerCase() as Hex,
   }));
+}
+
+export async function assertAnvilWalletBridgeRejectsUnauthorizedCall(page: Page): Promise<void> {
+  const response = await page.evaluate(async (bindingName) => {
+    const bridge = Reflect.get(window, bindingName) as
+      | ((request: { method: string; params: readonly unknown[] }) => Promise<RpcBridgeResponse>)
+      | undefined;
+    if (typeof bridge !== 'function') return undefined;
+    return bridge({ method: 'eth_sendTransaction', params: [] });
+  }, RPC_BINDING_NAME);
+  if (
+    !response ||
+    response.ok ||
+    response.error.code !== 4_100 ||
+    response.error.message !== 'Disposable payer bridge rejected an unauthorized caller'
+  ) {
+    throw new Error('Disposable wallet bridge did not reject a direct unauthorized caller');
+  }
 }
