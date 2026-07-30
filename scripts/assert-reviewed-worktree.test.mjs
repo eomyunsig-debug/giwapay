@@ -100,17 +100,11 @@ test('materializes immutable reviewed bytes and recursive dependencies outside t
     'contract Payment {}\n',
   );
   assert.equal(
-    await readFile(
-      join(destination, 'contracts', 'lib', 'dependency', 'Dependency.sol'),
-      'utf8',
-    ),
+    await readFile(join(destination, 'contracts', 'lib', 'dependency', 'Dependency.sol'), 'utf8'),
     'contract Dependency {}\n',
   );
   assert.equal((await stat(join(destination, 'contracts', 'Payment.sol'))).mode & 0o222, 0);
-  await assert.rejects(
-    access(join(destination, 'contracts', '.git')),
-    /ENOENT/,
-  );
+  await assert.rejects(access(join(destination, 'contracts', '.git')), /ENOENT/);
 });
 
 for (const indexFlag of ['--assume-unchanged', '--skip-worktree']) {

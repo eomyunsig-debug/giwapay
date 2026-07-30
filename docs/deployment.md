@@ -43,12 +43,19 @@ for the scripted mock configuration.
 
 Inherited `FOUNDRY_*`, `DAPP_*`, `ETH_GAS_PRICE`, and
 `ETH_PRIORITY_GAS_PRICE` overrides are rejected. Root or contract-directory
-`.env` files are also excluded from the reviewed deployment scope. The wrapper
-inspects the effective Forge configuration before any RPC request and requires
-the reviewed compiler version, optimizer, EVM target, IR mode, metadata policy,
-import roots, remappings, CREATE2 mode, and every output/cache/corpus path that
-`--force` may clear. Broadcast and resume commands force a fresh compile, so
-ignored local cache/output files are not accepted as deployment inputs.
+`.env` paths are explicitly absence-checked inside the reviewed deployment
+scope: an untracked, ignored, or modified file there fails closed. Supply
+secrets through the process environment or an out-of-repository secret source.
+The wrapper inspects the effective Forge configuration before any RPC request
+and requires the reviewed compiler version, optimizer, EVM target, IR mode,
+metadata policy, import roots, remappings, CREATE2 mode, and every
+output/cache/corpus path that `--force` may clear. Broadcast and resume commands
+force a fresh compile, so ignored local cache/output files are not accepted as
+deployment inputs.
+The operator binary must report Forge `1.7.1` at commit
+`4072e48705af9d93e3c0f6e29e93b5e9a40caed8`. Resume evidence is bound to that
+exact sensitive-cache schema; a different Forge build fails before any RPC
+request.
 
 From the exact clean commit, a new deployment is intentionally verbose:
 
@@ -71,12 +78,27 @@ sufficient buffer.
 
 ### Public evidence
 
-Foundry broadcast artifacts remain ignored under
-`packages/contracts/broadcast/` because they are machine-local recovery
-material. The sanitized
-`deployments/giwa-sepolia/current.json` is intentionally trackable and contains
-no RPC credential, keystore account name, raw transaction input, or absolute
-host path.
+Foundry's `run-latest.json` files remain ignored under
+`packages/contracts/broadcast/` and `packages/contracts/cache/`. A reviewed
+wrapper attempt instead seals two content-addressed files under the repository's
+shared Git directory:
+
+- `giwapay-deployment-evidence/91342/broadcast/run-<sha256>.json` is the public
+  Foundry broadcast sequence.
+- `giwapay-deployment-evidence/91342/cache/run-<sha256>.json` is the private
+  sensitive sequence required by Forge `--resume`.
+
+The second file contains an RPC URL for each transaction. That URL may contain
+provider credentials, so both stores are private operator material, are created
+with restrictive permissions, and must never be committed, uploaded, pasted
+into an issue, or logged. The wrapper hashes every cached RPC value and requires
+it to match the currently reviewed `GIWA_RPC_URL`; it does not expose the URL in
+the public evidence.
+
+The sanitized `deployments/giwa-sepolia/current.json` is intentionally
+trackable. It contains the content digests and a transition-journal reference,
+but no RPC credential, keystore account name, raw transaction input, private
+cache path, or absolute host path.
 
 A new broadcast requires that exact tracked schema-v2 GIWA Sepolia placeholder.
 A missing, malformed, legacy-schema, wrong-network, or evidence-bearing
@@ -90,7 +112,10 @@ The public manifest records:
 - the broadcast source commit, evidence-tooling commit, and explorer
   verification;
 - earliest indexed block;
-- a SHA-256 digest of the private broadcast artifact;
+- SHA-256 digests binding the broadcast artifact, its private resume sidecar,
+  and the wrapper transition journal;
+- the reviewed Forge version, Forge commit, RPC URL digest, and transaction
+  count needed to validate the private resume sidecar without publishing it;
 - the Foundry-recorded commit prefix and its match to the reviewed full SHA;
 - separate broadcast and verification statuses.
 
@@ -118,9 +143,10 @@ The two commit anchors intentionally cover different reviewed scopes:
   paths determine the deployed contract bytecode and transactions.
 - `evidenceToolingCommit` anchors `scripts/deploy-giwa-sepolia.sh`,
   `scripts/extract-deployment.mjs`,
-  `scripts/assert-reviewed-worktree.mjs`, `package.json`, and `pnpm-lock.yaml`.
-  These files determine how recovery is guarded and how public evidence is
-  extracted.
+  `scripts/assert-reviewed-worktree.mjs`,
+  `scripts/capture-deployment-transition.mjs`, `package.json`, and
+  `pnpm-lock.yaml`. These files determine how recovery is guarded and how
+  public evidence is extracted.
 
 Before any RPC request, both scopes must match their recorded commits. The
 wrapper rejects tracked or untracked differences (including ignored untracked
@@ -130,7 +156,10 @@ raw worktree blob bytes, path sets, and executable modes directly with the
 reviewed trees, so Git clean filters or a stale stat cache cannot hide a
 different compiler input. Inherited Git repository/configuration redirects are
 rejected, the discovered repository root is checked, and Git replacement refs
-and grafts are forbidden.
+and grafts are forbidden. The checker is not trusted from its mutable worktree
+path: the already-running wrapper first materializes that checker from the
+exact reviewed Git blob into a private bootstrap directory, then uses only that
+immutable copy to validate and materialize the remaining tooling and source.
 `deploymentScopeDirty` conservatively
 reports the reviewed deployment scopes enforced by these checks;
 `fullTreeDirty` separately reports unrelated working-tree changes. For a
@@ -148,15 +177,50 @@ Never commit a credential or generated keystore material.
 
 ### Failure recovery, resume, and verification
 
-The wrapper writes or refreshes public evidence after the broadcast phase even
-when Foundry later returns an error. It never automatically resumes a failed
-broadcast. If any attempt produced `run-latest.json`, do not run a new
-deployment command:
+The wrapper never automatically resumes a failed broadcast. Before Forge can
+sign, it creates a token-bound `giwapay-deployment-91342-inflight.json` guard in
+the shared Git directory and runs Forge only from an isolated private workspace
+whose reviewed source and tooling inputs are materialized read-only. Its output
+directories remain writable only so Forge and the evidence helper can seal the
+broadcast, private cache, and journal. The guard remains until the resulting
+public and private evidence has been reviewed and reconciled. An existing guard
+blocks every new deployment or resume across all worktrees that share this Git
+directory; do not delete it manually. Separate clones or machines do not share
+that lock, so the same deployer account must still have one explicitly
+serialized operator lane.
 
-1. Preserve
-   `packages/contracts/broadcast/DeployGiwaSepolia.s.sol/91342/run-latest.json`.
-   Inspect its receipts, the deployer nonce, and explorer transactions.
-2. Regenerate evidence without sending a transaction:
+Every wrapper invocation also holds a private
+`giwapay-deployment.lock` owner file in that shared Git directory. The complete
+owner record is written and fsynced under a unique name, then hard-linked into
+the canonical lock path atomically; a crash cannot leave an ownerless lock
+directory. Transition helpers require the matching active wrapper identity and
+operation. This prevents accidental direct helper use, but it is not a security
+boundary against another malicious process running as the same operating-system
+user. Keep the deployer keystore and this OS account outside untrusted-agent
+control.
+
+When Forge produces both sequence files, the wrapper stores them and the
+transition journal by digest, publishes a `broadcast-transition` manifest with
+`resumeAuthorized=false`, and stops even if Forge returned success. This forced
+review boundary prevents one invocation from signing and then silently
+authorizing another signature.
+
+If an attempt reached Forge, do not run a new deployment command:
+
+1. Preserve the repository's shared Git directory and the sealed workspace
+   named in the in-flight guard. Inspect the content-addressed broadcast
+   sequence, its receipts, the deployer nonce, and explorer transactions.
+   Treat the matching private cache sequence as a secret. If the process died
+   before durable capture, reconciliation can import both exact files from the
+   guarded sealed workspace; it does not sign. If an older cleanup crash removed
+   that disposable workspace after the exact guard/journal/artifact/sidecar
+   transition was already committed, reconciliation can validate the
+   content-addressed copies and close the matching guard without the workspace.
+   If neither a complete guarded output pair nor that committed transition
+   exists, the wrapper remains fail-closed and requires an explicit deployer
+   nonce and receipt audit; it never invents evidence or authorizes a retry.
+2. Review and commit the generated `broadcast-transition` manifest. Then
+   reconcile it without sending a transaction:
 
    ```sh
    RECONCILE_GIWA_SEPOLIA_DEPLOY=91342 \
@@ -164,7 +228,7 @@ deployment command:
    pnpm deploy:giwa-sepolia
    ```
 
-   Before reconciliation, restore `current.json` to the exact tracked and clean
+   Before reconciliation, `current.json` must be the exact tracked and clean
    `HEAD` version. The wrapper compares the raw working-file blob directly with
    the committed blob, in addition to checking Git status, and rejects a
    mismatch before any RPC request. Git ignore-index flags therefore cannot
@@ -180,9 +244,22 @@ deployment command:
    manifest nor recovered evidence identifies the deployment source, also set
    `DEPLOYMENT_SOURCE_COMMIT_OVERRIDE` to the reviewed full commit SHA that
    produced the broadcast.
-   Review the refreshed `current.json`, then commit that evidence file before
-   any resume or standalone verification attempt. Reconciliation never grants
-   permission to broadcast.
+   Reconciliation validates the guard, transition journal, content-addressed
+   public sequence, private sidecar, exact Forge schema, and current RPC digest.
+   It may then close the matching guard. A partial result becomes
+   `resumeAuthorized=true`; a complete result remains non-resumable. Review and
+   commit the refreshed `current.json` before any resume or standalone
+   verification attempt. A first-digest or legacy reconciliation without this
+   full transition provenance always remains `resumeAuthorized=false`. The
+   journal's signing/capture-tooling commit remains immutable and is validated
+   separately from the later extractor commit recorded at the top of the
+   reconciled manifest. Closing first removes and fsyncs the authoritative
+   signing guard; only then does it best-effort remove the private sealed
+   workspace through the recorded, token-bound temporary-directory boundary.
+   A crash can therefore leave an inert workspace behind, but cannot leave a
+   live guard pointing at a workspace that cleanup already deleted. A public
+   Forge artifact that is byte-for-byte unchanged is never treated as resume
+   progress merely because the private cache was reserialized.
 
 3. Resume only after confirming that the manifest is partial, the remaining
    nonces are still valid, and the deployment source tree is byte-for-byte
@@ -191,9 +268,12 @@ deployment command:
    `evidenceToolingCommit`. Provide the same account, role, fee, and mode
    variables, then use `RESUME_GIWA_SEPOLIA_DEPLOY=91342`. Foundry `--resume`
    may send only pending transactions; it is still a privileged broadcast. The
-   wrapper permits this only for a Git-anchored `broadcast-partial` manifest,
-   verifies the broadcast artifact SHA-256, and rejects any network, source,
-   evidence-tooling, deployer, role, fee, production, or mock-mode mismatch.
+   wrapper permits this only for a Git-anchored `broadcast-partial` manifest
+   with `resumeAuthorized=true`. It verifies the broadcast artifact, private
+   cache sidecar, and transition-journal digests; requires every cached RPC to
+   match the current reviewed endpoint; stages both exact files into the
+   isolated Forge paths; and rejects any network, source, evidence-tooling,
+   deployer, role, fee, production, or mock-mode mismatch.
 4. If the broadcast is complete but verification failed, do not resume or
    redeploy. Commit the reviewed complete manifest, keep the deployment source
    tree and evidence tooling identical to their separately recorded commits,
@@ -227,12 +307,14 @@ This is the only supported way for a later commit to change recovery or
 extraction tooling for an existing broadcast. It does not authorize a contract
 change, a replacement broadcast, or use of uncommitted tooling.
 
-If the broadcast artifact is lost, the wrapper intentionally refuses resume.
-Recover it from protected operator storage and reconcile every receipt; never
-clear the guard or start a replacement deployment merely to recreate a
-manifest. Before an intentional later replacement, archive the reviewed public
-manifest and recovery artifact under an immutable release record, then reset
-the `current.json` placeholder in a reviewed commit.
+If either the broadcast artifact, its matching private cache sidecar, or the
+transition journal is lost, the wrapper intentionally refuses resume. Recover
+the exact content-addressed files from protected operator storage and reconcile
+every receipt; never clear the guard or start a replacement deployment merely
+to recreate a manifest. Before an intentional later replacement, archive the
+reviewed public manifest and both recovery artifacts under an access-controlled
+immutable release record, then reset the `current.json` placeholder in a
+reviewed commit.
 
 During reconcile, supplied role/fee/mode values are comparison inputs only.
 They cannot overwrite recorded configuration; any mismatch changes the

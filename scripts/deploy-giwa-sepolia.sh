@@ -6,11 +6,13 @@ contracts_dir="$repository_root/packages/contracts"
 broadcast_dir="$contracts_dir/broadcast/DeployGiwaSepolia.s.sol/91342"
 legacy_broadcast_path="$broadcast_dir/run-latest.json"
 broadcast_path="$legacy_broadcast_path"
+recovery_sidecar_path=""
 manifest_path="$repository_root/deployments/giwa-sepolia/current.json"
 manifest_relative_path="deployments/giwa-sepolia/current.json"
 expected_chain_id="91342"
 expected_genesis_hash="0xca1b5fee64a196abfca007b3a4d4e3ec2b37be83a452d452bf4e45937004cab2"
-reviewed_worktree_checker="$repository_root/scripts/assert-reviewed-worktree.mjs"
+expected_forge_version="1.7.1"
+expected_forge_commit="4072e48705af9d93e3c0f6e29e93b5e9a40caed8"
 broadcast_source_paths=(
   .env
   packages/contracts/src
@@ -25,17 +27,56 @@ evidence_tooling_paths=(
   scripts/deploy-giwa-sepolia.sh
   scripts/extract-deployment.mjs
   scripts/assert-reviewed-worktree.mjs
+  scripts/capture-deployment-transition.mjs
   package.json
   pnpm-lock.yaml
 )
 sealed_repository_root=""
+sealed_repository_realpath=""
+sealed_temp_parent_realpath=""
+deployment_lock_path=""
+deployment_lock_token=""
+deployment_lock_acquired="false"
 
-cleanup_sealed_repository() {
+cleanup_runtime_state() {
   if [[ -n "$sealed_repository_root" && -d "$sealed_repository_root" ]]; then
-    rm -rf -- "$sealed_repository_root"
+    if [[ -n "${inflight_guard_path:-}" &&
+      (-e "$inflight_guard_path" || -L "$inflight_guard_path") ]]; then
+      echo "Preserved unresolved isolated deployment workspace: $sealed_repository_root" >&2
+    elif [[ -n "$sealed_repository_realpath" &&
+      "$sealed_repository_root" == "$sealed_repository_realpath" &&
+      -n "$sealed_temp_parent_realpath" &&
+      "$(dirname "$sealed_repository_root")" == "$sealed_temp_parent_realpath" &&
+      "$(basename "$sealed_repository_root")" == giwapay-reviewed-deploy.* ]]; then
+      rm -rf -- "$sealed_repository_root"
+    else
+      echo "Refusing unsafe isolated workspace cleanup: $sealed_repository_root" >&2
+    fi
+  fi
+  if [[ "$deployment_lock_acquired" == "true" &&
+    -n "$deployment_lock_path" &&
+    -n "$deployment_lock_token" &&
+    (-e "$deployment_lock_path" || -L "$deployment_lock_path") ]]; then
+    node -e '
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const [ownerPath, expectedToken] = process.argv.slice(1);
+      const stats = fs.lstatSync(ownerPath);
+      if (!stats.isFile() || stats.isSymbolicLink()) process.exit(1);
+      const owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
+      if (owner.token !== expectedToken) process.exit(1);
+      fs.unlinkSync(ownerPath);
+      const directoryDescriptor = fs.openSync(path.dirname(ownerPath), "r");
+      try {
+        fs.fsyncSync(directoryDescriptor);
+      } finally {
+        fs.closeSync(directoryDescriptor);
+      }
+    ' "$deployment_lock_path" "$deployment_lock_token" ||
+      echo "Deployment lock ownership changed; the lock was preserved for review." >&2
   fi
 }
-trap cleanup_sealed_repository EXIT
+trap cleanup_runtime_state EXIT
 
 fail() {
   echo "$*" >&2
@@ -44,6 +85,61 @@ fail() {
 
 lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+publish_sealed_manifest() {
+  local published_sha256
+  published_sha256="$(
+    node -e '
+      const crypto = require("node:crypto");
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const [source, destination, expectedDigest] = process.argv.slice(1);
+      const digest = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
+      const sourceStats = fs.lstatSync(source);
+      const destinationStats = fs.lstatSync(destination);
+      if (
+        !sourceStats.isFile() ||
+        sourceStats.isSymbolicLink() ||
+        !destinationStats.isFile() ||
+        destinationStats.isSymbolicLink()
+      ) {
+        process.exit(1);
+      }
+      const currentBytes = fs.readFileSync(destination);
+      if (digest(currentBytes) !== expectedDigest) process.exit(2);
+      const nextBytes = fs.readFileSync(source);
+      const temporaryPath = path.join(
+        path.dirname(destination),
+        `.${path.basename(destination)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+      );
+      let descriptor;
+      try {
+        descriptor = fs.openSync(temporaryPath, "wx", 0o644);
+        fs.writeFileSync(descriptor, nextBytes);
+        fs.fsyncSync(descriptor);
+        fs.closeSync(descriptor);
+        descriptor = undefined;
+        if (digest(fs.readFileSync(destination)) !== expectedDigest) process.exit(3);
+        fs.renameSync(temporaryPath, destination);
+        const directoryDescriptor = fs.openSync(path.dirname(destination), "r");
+        try {
+          fs.fsyncSync(directoryDescriptor);
+        } finally {
+          fs.closeSync(directoryDescriptor);
+        }
+      } finally {
+        if (descriptor !== undefined) fs.closeSync(descriptor);
+        try {
+          fs.rmSync(temporaryPath);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+      }
+      process.stdout.write(digest(nextBytes));
+    ' "$sealed_manifest_path" "$manifest_path" "$canonical_manifest_expected_sha256"
+  )" || fail "The public manifest changed concurrently; isolated evidence was preserved without overwriting it."
+  canonical_manifest_expected_sha256="$published_sha256"
 }
 
 reviewed_git() {
@@ -65,11 +161,21 @@ reviewed_git() {
     git "$@"
 }
 
-for executable in forge cast node git tar mktemp; do
+for executable in forge cast node git mktemp; do
   if ! command -v "$executable" >/dev/null 2>&1; then
     fail "Required executable is unavailable: $executable"
   fi
 done
+forge_identity="$(forge --version)"
+node -e '
+  const [identity, expectedVersion, expectedCommit] = process.argv.slice(1);
+  const lines = identity.split(/\r?\n/);
+  if (
+    lines[0] !== `forge Version: ${expectedVersion}` ||
+    lines[1] !== `Commit SHA: ${expectedCommit}`
+  ) process.exit(1);
+' "$forge_identity" "$expected_forge_version" "$expected_forge_commit" ||
+  fail "Forge must be the reviewed $expected_forge_version build ($expected_forge_commit) before deployment or resume."
 foundry_override_names=()
 git_redirect_names=()
 while IFS= read -r environment_name; do
@@ -91,8 +197,6 @@ fi
 if ((${#git_redirect_names[@]} > 0)); then
   fail "Unset inherited Git repository/configuration redirects before deployment: ${git_redirect_names[*]}"
 fi
-node --check "$repository_root/scripts/extract-deployment.mjs" >/dev/null
-node --check "$reviewed_worktree_checker" >/dev/null
 replacement_refs="$(reviewed_git -C "$repository_root" replace -l)"
 [[ -z "$replacement_refs" ]] ||
   fail "Git replacement refs are not allowed for deployment or recovery."
@@ -134,6 +238,122 @@ elif [[ -n "$verify_requested" ]]; then
 else
   [[ "${CONFIRM_GIWA_SEPOLIA_DEPLOY:-}" == "$expected_chain_id" ]] ||
     fail "Refusing to broadcast. Set CONFIRM_GIWA_SEPOLIA_DEPLOY=$expected_chain_id for an explicit new testnet deployment."
+fi
+
+git_common_dir_value="$(reviewed_git -C "$repository_root" rev-parse --git-common-dir)"
+deployment_lock_path="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const [root, commonValue] = process.argv.slice(1);
+    const commonPath = path.resolve(root, commonValue);
+    const stats = fs.lstatSync(commonPath);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) process.exit(1);
+    process.stdout.write(path.join(fs.realpathSync(commonPath), "giwapay-deployment.lock"));
+  ' "$repository_root" "$git_common_dir_value"
+)" || fail "Could not resolve the shared Git directory for the deployment lock."
+git_common_dir_realpath="$(dirname "$deployment_lock_path")"
+umask 077
+shared_evidence_root="$git_common_dir_realpath/giwapay-deployment-evidence/$expected_chain_id"
+canonical_broadcast_dir="$shared_evidence_root/broadcast"
+canonical_recovery_cache_dir="$shared_evidence_root/cache"
+deployment_lock_token="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+node -e '
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const [commonRoot, ownerPath, token, operation, wrapperPidValue] =
+    process.argv.slice(1);
+  const stagingPath = path.join(commonRoot, `.giwapay-deployment-lock.${token}.tmp`);
+  const wrapperPid = Number(wrapperPidValue);
+  if (
+    path.dirname(ownerPath) !== commonRoot ||
+    path.basename(ownerPath) !== "giwapay-deployment.lock" ||
+    !Number.isSafeInteger(wrapperPid) ||
+    wrapperPid <= 0
+  ) process.exit(1);
+  const payload = {
+    schemaVersion: 1,
+    token,
+    pid: wrapperPid,
+    operation,
+    startedAt: new Date().toISOString(),
+  };
+  let descriptor;
+  try {
+    descriptor = fs.openSync(stagingPath, "wx", 0o600);
+    fs.writeFileSync(descriptor, `${JSON.stringify(payload, null, 2)}\n`);
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    fs.linkSync(stagingPath, ownerPath);
+    const directoryDescriptor = fs.openSync(commonRoot, "r");
+    try {
+      fs.fsyncSync(directoryDescriptor);
+    } finally {
+      fs.closeSync(directoryDescriptor);
+    }
+  } finally {
+    if (descriptor !== undefined) fs.closeSync(descriptor);
+    try {
+      fs.unlinkSync(stagingPath);
+      const directoryDescriptor = fs.openSync(commonRoot, "r");
+      try {
+        fs.fsyncSync(directoryDescriptor);
+      } finally {
+        fs.closeSync(directoryDescriptor);
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+' "$git_common_dir_realpath" "$deployment_lock_path" "$deployment_lock_token" "$operation" "$$" ||
+  fail "Another deployment or recovery process holds the shared repository lock. If it crashed, inspect the durable lock owner and on-chain account state; never delete it automatically."
+deployment_lock_acquired="true"
+export GIWAPAY_WRAPPER_PID="$$"
+
+node -e '
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const [rootValue, ...directories] = process.argv.slice(1);
+  const root = fs.realpathSync(path.resolve(rootValue));
+  for (const directoryValue of directories) {
+    const directory = path.resolve(directoryValue);
+    const relative = path.relative(root, directory);
+    if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+      process.exit(1);
+    }
+    let cursor = root;
+    for (const component of relative.split(path.sep)) {
+      const parent = cursor;
+      cursor = path.join(cursor, component);
+      if (!fs.existsSync(cursor)) {
+        fs.mkdirSync(cursor, { mode: 0o700 });
+        const parentDescriptor = fs.openSync(parent, "r");
+        try {
+          fs.fsyncSync(parentDescriptor);
+        } finally {
+          fs.closeSync(parentDescriptor);
+        }
+      }
+      const stats = fs.lstatSync(cursor);
+      if (
+        !stats.isDirectory() ||
+        stats.isSymbolicLink() ||
+        (stats.mode & 0o077) !== 0
+      ) process.exit(1);
+    }
+  }
+' "$git_common_dir_realpath" "$canonical_broadcast_dir" "$canonical_recovery_cache_dir" ||
+  fail "Shared deployment evidence directories must remain private real directories inside the Git common directory."
+
+inflight_guard_path="$git_common_dir_realpath/giwapay-deployment-91342-inflight.json"
+inflight_guard_present="false"
+if [[ -e "$inflight_guard_path" || -L "$inflight_guard_path" ]]; then
+  inflight_guard_present="true"
+fi
+if [[ "$operation" == "deploy" || "$operation" == "resume" ]]; then
+  [[ "$inflight_guard_present" == "false" ]] ||
+    fail "An unresolved deployment attempt guard blocks signing. Inspect its sealed workspace and recover evidence before any rebroadcast."
 fi
 
 if [[ "$operation" == "deploy" ]]; then
@@ -272,17 +492,220 @@ existing_manifest_broadcast_sha256="$(
     }
   ' "$manifest_path"
 )"
+existing_manifest_broadcast_file_name="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
+      if (!Object.hasOwn(manifest, "broadcastArtifact")) {
+        process.stdout.write("none");
+      } else {
+        const fileName = manifest.broadcastArtifact?.fileName;
+        process.stdout.write(
+          fileName === "run-latest.json" || /^run-[0-9a-fA-F]{64}\.json$/.test(fileName ?? "")
+            ? fileName
+            : "invalid",
+        );
+      }
+    } catch {
+      process.stdout.write("invalid");
+    }
+  ' "$manifest_path"
+)"
+existing_manifest_resume_authorized="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    try {
+      const artifact = JSON.parse(fs.readFileSync(path, "utf8")).broadcastArtifact;
+      if (artifact === undefined) {
+        process.stdout.write("none");
+      } else if (artifact.resumeAuthorized === true) {
+        process.stdout.write("true");
+      } else if (artifact.resumeAuthorized === false || artifact.resumeAuthorized === undefined) {
+        process.stdout.write("false");
+      } else {
+        process.stdout.write("invalid");
+      }
+    } catch {
+      process.stdout.write("invalid");
+    }
+  ' "$manifest_path"
+)"
+existing_manifest_recovery_sidecar="$(
+  node -e '
+    const fs = require("node:fs");
+    try {
+      const reference = JSON.parse(
+        fs.readFileSync(process.argv[1], "utf8"),
+      ).broadcastArtifact?.recoverySidecar;
+      if (reference === undefined) {
+        process.stdout.write(JSON.stringify({ state: "none" }));
+      } else if (
+        /^run-[0-9a-f]{64}\.json$/.test(reference.fileName ?? "") &&
+        /^[0-9a-f]{64}$/.test(reference.sha256 ?? "") &&
+        reference.fileName === `run-${reference.sha256}.json` &&
+        /^[0-9a-f]{64}$/.test(reference.publicArtifactSha256 ?? "") &&
+        /^[0-9a-f]{64}$/.test(reference.rpcUrlSha256 ?? "") &&
+        reference.storage === "foundry-cache-private"
+      ) {
+        process.stdout.write(JSON.stringify({
+          state: "valid",
+          fileName: reference.fileName,
+          sha256: reference.sha256,
+          publicArtifactSha256: reference.publicArtifactSha256,
+          rpcUrlSha256: reference.rpcUrlSha256,
+        }));
+      } else {
+        process.stdout.write(JSON.stringify({ state: "invalid" }));
+      }
+    } catch {
+      process.stdout.write(JSON.stringify({ state: "invalid" }));
+    }
+  ' "$manifest_path"
+)"
+existing_manifest_recovery_sidecar_state="$(
+  node -e 'process.stdout.write(JSON.parse(process.argv[1]).state)' \
+    "$existing_manifest_recovery_sidecar"
+)"
+existing_manifest_has_transition_provenance="$(
+  node -e '
+    const fs = require("node:fs");
+    try {
+      const artifact = JSON.parse(
+        fs.readFileSync(process.argv[1], "utf8"),
+      ).broadcastArtifact;
+      process.stdout.write(
+        artifact?.recoverySidecar &&
+        artifact?.resumePolicy &&
+        artifact?.transitionJournal
+          ? "true"
+          : "false",
+      );
+    } catch {
+      process.stdout.write("false");
+    }
+  ' "$manifest_path"
+)"
+current_resume_authorized="false"
+if [[ "$existing_manifest_resume_authorized" == "true" ]]; then
+  current_resume_authorized="true"
+fi
+recovered_first_artifact=""
 
 if [[ "$operation" == "deploy" ]]; then
-  [[ ! -e "$broadcast_path" ]] ||
+  broadcast_evidence_exists="$(
+    node -e '
+      const fs = require("node:fs");
+      for (const directory of process.argv.slice(1)) {
+        try {
+          const entries = fs.readdirSync(directory, { withFileTypes: true });
+          if (entries.some((entry) => /^run-.*\.json$/.test(entry.name))) {
+            process.stdout.write("true");
+            process.exit(0);
+          }
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+      }
+      process.stdout.write("false");
+    ' "$broadcast_dir" "$canonical_broadcast_dir"
+  )"
+  [[ "$broadcast_evidence_exists" == "false" ]] ||
     fail "Existing Foundry broadcast evidence blocks a new deployment. Reconcile it; never rerun blindly."
   [[ "$existing_manifest_status" == "not-deployed" ]] ||
     fail "Existing public deployment evidence blocks a new deployment. Review and archive it before any intentional replacement."
 else
-  [[ -f "$broadcast_path" ]] ||
-    fail "Recovery requires the original Foundry run-latest.json broadcast artifact."
+  if [[ "$existing_manifest_broadcast_sha256" == "none" ]]; then
+    if [[ "$operation" == "reconcile" && "$inflight_guard_present" == "true" ]]; then
+      recovered_first_artifact="guard-pending"
+      broadcast_path=""
+    else
+      recovered_first_artifact="$(
+      node -e '
+        const fs = require("node:fs");
+        const path = require("node:path");
+        const directory = process.argv[1];
+        let entries;
+        try {
+          entries = fs.readdirSync(directory, { withFileTypes: true });
+        } catch (error) {
+          if (error?.code === "ENOENT") {
+            process.stdout.write("none");
+            process.exit(0);
+          }
+          throw error;
+        }
+        const candidates = entries.filter((entry) =>
+          entry.name === "run-latest.json" || /^run-[0-9a-fA-F]{64}\.json$/.test(entry.name),
+        );
+        if (candidates.some((entry) => !entry.isFile())) {
+          process.stdout.write("invalid");
+        } else if (candidates.length === 1) {
+          process.stdout.write(candidates[0].name);
+        } else {
+          process.stdout.write(candidates.length === 0 ? "none" : "ambiguous");
+        }
+      ' "$broadcast_dir"
+      )"
+      [[ "$recovered_first_artifact" != "none" &&
+        "$recovered_first_artifact" != "invalid" &&
+        "$recovered_first_artifact" != "ambiguous" ]] ||
+        fail "Recovery without a committed artifact digest requires exactly one regular Foundry broadcast artifact."
+      broadcast_path="$broadcast_dir/$recovered_first_artifact"
+    fi
+  else
+    [[ "$existing_manifest_broadcast_file_name" != "invalid" &&
+      "$existing_manifest_broadcast_file_name" != "none" ]] ||
+      fail "Recovery requires a safe committed broadcast artifact file name."
+    if [[ "$existing_manifest_broadcast_file_name" != "run-latest.json" &&
+      "$existing_manifest_broadcast_file_name" != "run-$existing_manifest_broadcast_sha256.json" ]]; then
+      fail "The committed content-addressed broadcast file name must match its SHA-256."
+    fi
+    if [[ "$existing_manifest_resume_authorized" == "true" &&
+      "$existing_manifest_broadcast_file_name" != "run-$existing_manifest_broadcast_sha256.json" ]]; then
+      fail "Resume authorization requires a content-addressed broadcast artifact."
+    fi
+    if [[ "$existing_manifest_broadcast_file_name" == "run-latest.json" ]]; then
+      broadcast_path="$legacy_broadcast_path"
+    else
+      broadcast_path="$canonical_broadcast_dir/$existing_manifest_broadcast_file_name"
+    fi
+  fi
+  if [[ "$existing_manifest_recovery_sidecar_state" == "valid" ]]; then
+    recorded_sidecar_file_name="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).fileName)' \
+        "$existing_manifest_recovery_sidecar"
+    )"
+    recorded_sidecar_public_sha256="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).publicArtifactSha256)' \
+        "$existing_manifest_recovery_sidecar"
+    )"
+    [[ "$recorded_sidecar_public_sha256" == "$existing_manifest_broadcast_sha256" ]] ||
+      fail "The private recovery sidecar is bound to another public artifact digest."
+    recorded_sidecar_rpc_url_sha256="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).rpcUrlSha256)' \
+        "$existing_manifest_recovery_sidecar"
+    )"
+    recovery_sidecar_path="$canonical_recovery_cache_dir/$recorded_sidecar_file_name"
+    [[ -f "$recovery_sidecar_path" && ! -L "$recovery_sidecar_path" ]] ||
+      fail "Recovery requires the exact private content-addressed Foundry cache sidecar."
+  elif [[ "$existing_manifest_recovery_sidecar_state" == "invalid" ]]; then
+    fail "The committed private recovery sidecar reference is malformed."
+  fi
+  if [[ "$recovered_first_artifact" != "guard-pending" ]]; then
+    [[ -f "$broadcast_path" ]] ||
+      fail "Recovery requires the exact recorded Foundry broadcast artifact."
+  fi
   if [[ "$operation" == "resume" && "$existing_manifest_status" != "broadcast-partial" ]]; then
     fail "Resume is allowed only for an exact broadcast-partial manifest, never a complete or conflicting deployment."
+  fi
+  if [[ "$operation" == "resume" && "$existing_manifest_resume_authorized" != "true" ]]; then
+    fail "Resume is not authorized for a first-digest or legacy reconciled artifact; only a sealed wrapper-generated partial artifact may sign pending transactions."
+  fi
+  if [[ "$operation" == "resume" && -z "$recovery_sidecar_path" ]]; then
+    fail "Resume authorization requires the exact private content-addressed Foundry cache sidecar."
   fi
   if [[ "$operation" == "verify" && "$existing_manifest_status" != "broadcast-complete" ]]; then
     fail "Verification is allowed only after the manifest records broadcast-complete."
@@ -304,7 +727,165 @@ else
   fi
 fi
 
-if [[ "$operation" == "reconcile" ]]; then
+umask 077
+sealed_temp_parent_realpath="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const candidate = path.resolve(process.argv[1]);
+    const stats = fs.lstatSync(candidate);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) process.exit(1);
+    process.stdout.write(fs.realpathSync(candidate));
+  ' "${TMPDIR:-/tmp}"
+)" || fail "TMPDIR must resolve to a real directory for isolated deployment."
+sealed_repository_root="$(mktemp -d "$sealed_temp_parent_realpath/giwapay-reviewed-deploy.XXXXXX")"
+[[ -n "$sealed_repository_root" && -d "$sealed_repository_root" &&
+  ! -L "$sealed_repository_root" ]] ||
+  fail "Could not create an isolated reviewed deployment workspace."
+sealed_repository_realpath="$(node -e 'process.stdout.write(require("node:fs").realpathSync(process.argv[1]))' "$sealed_repository_root")"
+[[ "$sealed_repository_root" == "$sealed_repository_realpath" &&
+  "$(dirname "$sealed_repository_root")" == "$sealed_temp_parent_realpath" &&
+  "$(basename "$sealed_repository_root")" == giwapay-reviewed-deploy.* ]] ||
+  fail "The isolated deployment workspace path failed its deletion-safety boundary."
+
+bootstrap_checker_directory="$sealed_repository_root/.giwapay-bootstrap"
+bootstrap_checker="$bootstrap_checker_directory/assert-reviewed-worktree.mjs"
+mkdir -m 700 "$bootstrap_checker_directory"
+reviewed_checker_entry="$(
+  reviewed_git -C "$repository_root" ls-tree \
+    "$evidence_tooling_commit" \
+    -- \
+    scripts/assert-reviewed-worktree.mjs
+)" || fail "Could not resolve the reviewed worktree checker blob."
+IFS=$' \t' read -r reviewed_checker_mode reviewed_checker_type reviewed_checker_object reviewed_checker_path <<<"$reviewed_checker_entry"
+[[ ("$reviewed_checker_mode" == "100644" || "$reviewed_checker_mode" == "100755") &&
+  "$reviewed_checker_type" == "blob" &&
+  "$reviewed_checker_object" =~ ^[0-9a-fA-F]{40,64}$ &&
+  "$reviewed_checker_path" == "scripts/assert-reviewed-worktree.mjs" ]] ||
+  fail "The reviewed worktree checker must resolve to one exact regular Git blob."
+reviewed_git -C "$repository_root" cat-file blob "$reviewed_checker_object" |
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    const chunks = [];
+    process.stdin.on("data", (chunk) => chunks.push(chunk));
+    process.stdin.on("end", () => {
+      const descriptor = fs.openSync(path, "wx", 0o400);
+      try {
+        fs.writeFileSync(descriptor, Buffer.concat(chunks));
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+    });
+  ' "$bootstrap_checker" ||
+  fail "Could not bootstrap the reviewed worktree checker from its immutable Git blob."
+node --check "$bootstrap_checker" >/dev/null ||
+  fail "The immutable reviewed worktree checker is not valid JavaScript."
+node "$bootstrap_checker" \
+  "$repository_root" \
+  "$evidence_tooling_commit" \
+  --materialize "$sealed_repository_root" \
+  "${evidence_tooling_paths[@]}" ||
+  fail "Deployment and evidence tooling must exactly match and materialize from its reviewed commit, without hidden index flags or untracked files."
+sealed_worktree_checker="$sealed_repository_root/scripts/assert-reviewed-worktree.mjs"
+node --check "$sealed_worktree_checker" >/dev/null
+node --check "$sealed_repository_root/scripts/extract-deployment.mjs" >/dev/null
+node --check "$sealed_repository_root/scripts/capture-deployment-transition.mjs" >/dev/null
+rm -- "$bootstrap_checker"
+rmdir "$bootstrap_checker_directory"
+node "$sealed_worktree_checker" \
+  "$repository_root" \
+  "$source_commit" \
+  --materialize "$sealed_repository_root" \
+  "${broadcast_source_paths[@]}" ||
+  fail "Broadcast-critical source must exactly match and materialize from its reviewed commit, without hidden index flags, untracked files, or dirty nested dependencies."
+
+reviewed_git -C "$sealed_repository_root" init --quiet
+reviewed_git -C "$sealed_repository_root" fetch \
+  --quiet \
+  --no-tags \
+  "$repository_root" \
+  "$source_commit"
+reviewed_git -C "$sealed_repository_root" update-ref \
+  refs/heads/reviewed-source \
+  "$source_commit"
+reviewed_git -C "$sealed_repository_root" symbolic-ref \
+  HEAD \
+  refs/heads/reviewed-source
+sealed_source_commit="$(reviewed_git -C "$sealed_repository_root" rev-parse HEAD)"
+[[ "$(lowercase "$sealed_source_commit")" == "$(lowercase "$source_commit")" ]] ||
+  fail "The isolated deployment workspace could not preserve the reviewed source identity."
+
+sealed_contracts_dir="$sealed_repository_root/packages/contracts"
+sealed_broadcast_dir="$sealed_contracts_dir/broadcast/DeployGiwaSepolia.s.sol/$expected_chain_id"
+sealed_recovery_cache_dir="$sealed_contracts_dir/cache/DeployGiwaSepolia.s.sol/$expected_chain_id"
+sealed_evidence_dir="$sealed_repository_root/.giwapay-evidence"
+sealed_manifest_path="$sealed_repository_root/$manifest_relative_path"
+mkdir -p \
+  "$(dirname "$sealed_manifest_path")" \
+  "$sealed_broadcast_dir" \
+  "$sealed_recovery_cache_dir" \
+  "$sealed_evidence_dir"
+canonical_manifest_expected_sha256="$(
+  node -e '
+    const crypto = require("node:crypto");
+    const fs = require("node:fs");
+    const [source, destination] = process.argv.slice(1);
+    const stats = fs.lstatSync(source);
+    if (!stats.isFile() || stats.isSymbolicLink()) process.exit(1);
+    const bytes = fs.readFileSync(source);
+    fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+    process.stdout.write(crypto.createHash("sha256").update(bytes).digest("hex"));
+  ' "$manifest_path" "$sealed_manifest_path"
+)" || fail "The reviewed manifest could not be captured in the isolated workspace."
+sealed_manifest_blob="$(
+  reviewed_git -C "$repository_root" hash-object --no-filters "$sealed_manifest_path"
+)"
+[[ "$(lowercase "$sealed_manifest_blob")" == "$(lowercase "$manifest_head_blob")" ]] ||
+  fail "The captured manifest no longer matches the reviewed HEAD blob."
+
+sealed_broadcast_path=""
+sealed_recovery_sidecar_path=""
+if [[ "$operation" != "deploy" && "$recovered_first_artifact" != "guard-pending" ]]; then
+  sealed_broadcast_path="$sealed_evidence_dir/$(basename "$broadcast_path")"
+  captured_broadcast_sha256="$(
+    node -e '
+      const crypto = require("node:crypto");
+      const fs = require("node:fs");
+      const [source, destination] = process.argv.slice(1);
+      const stats = fs.lstatSync(source);
+      if (!stats.isFile() || stats.isSymbolicLink()) process.exit(1);
+      const bytes = fs.readFileSync(source);
+      fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+      process.stdout.write(crypto.createHash("sha256").update(bytes).digest("hex"));
+    ' "$broadcast_path" "$sealed_broadcast_path"
+  )" || fail "The recovery artifact could not be captured as a regular-file snapshot."
+  if [[ -n "$recovery_sidecar_path" ]]; then
+    mkdir -p "$sealed_evidence_dir/private"
+    sealed_recovery_sidecar_path="$sealed_evidence_dir/private/$(basename "$recovery_sidecar_path")"
+    captured_recovery_sidecar_sha256="$(
+      node -e '
+        const crypto = require("node:crypto");
+        const fs = require("node:fs");
+        const [source, destination] = process.argv.slice(1);
+        const stats = fs.lstatSync(source);
+        if (!stats.isFile() || stats.isSymbolicLink()) process.exit(1);
+        const bytes = fs.readFileSync(source);
+        fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+        process.stdout.write(crypto.createHash("sha256").update(bytes).digest("hex"));
+      ' "$recovery_sidecar_path" "$sealed_recovery_sidecar_path"
+    )" || fail "The private recovery sidecar could not be captured as a regular-file snapshot."
+    recorded_sidecar_sha256="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).sha256)' \
+        "$existing_manifest_recovery_sidecar"
+    )"
+    [[ "$captured_recovery_sidecar_sha256" == "$recorded_sidecar_sha256" ]] ||
+      fail "The private recovery sidecar differs from its committed SHA-256."
+  fi
+fi
+
+if [[ "$operation" == "reconcile" && "$recovered_first_artifact" != "guard-pending" ]]; then
   case "$existing_manifest_broadcast_sha256" in
     none)
       [[ "$existing_manifest_status" == "not-deployed" ]] ||
@@ -314,33 +895,233 @@ if [[ "$operation" == "reconcile" ]]; then
       fail "Reconciliation requires a valid committed broadcast artifact SHA-256 or the exact not-deployed placeholder."
       ;;
     *)
-      current_broadcast_sha256="$(
-        node -e '
-          const crypto = require("node:crypto");
-          const fs = require("node:fs");
-          const bytes = fs.readFileSync(process.argv[1]);
-          process.stdout.write(crypto.createHash("sha256").update(bytes).digest("hex"));
-        ' "$broadcast_path"
-      )"
-      [[ "$current_broadcast_sha256" == "$existing_manifest_broadcast_sha256" ]] ||
-        fail "Reconciliation refuses to replace the committed broadcast artifact SHA-256; restore the original run-latest.json."
+      [[ "$captured_broadcast_sha256" == "$existing_manifest_broadcast_sha256" ]] ||
+        fail "Reconciliation refuses to replace the committed broadcast artifact SHA-256; restore the exact recorded artifact."
       ;;
   esac
+elif [[ "$operation" != "deploy" && "$recovered_first_artifact" != "guard-pending" ]]; then
+  [[ "$captured_broadcast_sha256" == "$existing_manifest_broadcast_sha256" ]] ||
+    fail "Recovery refuses a broadcast artifact that differs from the committed SHA-256."
 fi
 
-node "$reviewed_worktree_checker" \
-  "$repository_root" \
-  "$source_commit" \
-  "${broadcast_source_paths[@]}" ||
-  fail "Broadcast-critical source must exactly match its reviewed commit, without hidden index flags, untracked files, or dirty nested dependencies."
-node "$reviewed_worktree_checker" \
-  "$repository_root" \
-  "$evidence_tooling_commit" \
-  "${evidence_tooling_paths[@]}" ||
-  fail "Deployment and evidence tooling must exactly match its reviewed commit, without hidden index flags or untracked files."
+if [[ "$operation" == "reconcile" && "$inflight_guard_present" == "true" ]]; then
+  preserved_guard_metadata="$(
+    node -e '
+      const crypto = require("node:crypto");
+      const fs = require("node:fs");
+      const path = require("node:path");
+      const guard = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (
+        guard.operation !== "deploy" && guard.operation !== "resume" ||
+        typeof guard.attemptToken !== "string" ||
+        typeof guard.sealedWorkspace !== "string"
+      ) process.exit(1);
+      const outputPath = path.join(
+        guard.sealedWorkspace,
+        "packages/contracts/broadcast/DeployGiwaSepolia.s.sol/91342/run-latest.json",
+      );
+      const cachePath = path.join(
+        guard.sealedWorkspace,
+        "packages/contracts/cache/DeployGiwaSepolia.s.sol/91342/run-latest.json",
+      );
+      const fileState = (candidate) => {
+        try {
+          const stats = fs.lstatSync(candidate);
+          return stats.isFile() && !stats.isSymbolicLink() ? "regular" : "invalid";
+        } catch (error) {
+          if (error?.code === "ENOENT") return "missing";
+          throw error;
+        }
+      };
+      const outputFileState = fileState(outputPath);
+      const cacheFileState = fileState(cachePath);
+      const outputState =
+        outputFileState === "regular" && cacheFileState === "regular"
+          ? "complete"
+          : outputFileState === "missing" && cacheFileState === "missing"
+            ? "absent"
+            : "invalid";
+      const outputSha256 =
+        outputState === "complete"
+          ? crypto.createHash("sha256").update(fs.readFileSync(outputPath)).digest("hex")
+          : null;
+      const outputRecoverySidecarSha256 =
+        outputState === "complete"
+          ? crypto.createHash("sha256").update(fs.readFileSync(cachePath)).digest("hex")
+          : null;
+      process.stdout.write(JSON.stringify({
+        operation: guard.operation,
+        attemptToken: guard.attemptToken,
+        inputArtifactSha256: guard.inputArtifactSha256,
+        inputRecoverySidecarSha256: guard.inputRecoverySidecarSha256,
+        outputState,
+        outputSha256,
+        outputRecoverySidecarSha256,
+        sealedWorkspace: guard.sealedWorkspace,
+        signingEvidenceToolingCommit:
+          guard.signingEvidenceToolingCommit,
+        fullTreeDirty: guard.fullTreeDirty,
+        configuration: guard.configuration,
+      }));
+    ' "$inflight_guard_path"
+  )" || fail "The unresolved deployment attempt guard is malformed."
+  preserved_operation="$(
+    node -e 'process.stdout.write(JSON.parse(process.argv[1]).operation)' \
+      "$preserved_guard_metadata"
+  )"
+  preserved_attempt_token="$(
+    node -e 'process.stdout.write(JSON.parse(process.argv[1]).attemptToken)' \
+      "$preserved_guard_metadata"
+  )"
+  preserved_input_sha256="$(
+    node -e '
+      const value = JSON.parse(process.argv[1]).inputArtifactSha256;
+      process.stdout.write(value === null ? "none" : value);
+    ' "$preserved_guard_metadata"
+  )"
+  preserved_input_sidecar_sha256="$(
+    node -e '
+      const value = JSON.parse(process.argv[1]).inputRecoverySidecarSha256;
+      process.stdout.write(value === null ? "none" : value);
+    ' "$preserved_guard_metadata"
+  )"
+  preserved_output_state="$(
+    node -e 'process.stdout.write(JSON.parse(process.argv[1]).outputState)' \
+      "$preserved_guard_metadata"
+  )"
+  preserved_output_sha256="none"
+  preserved_output_sidecar_sha256="none"
+  if [[ "$preserved_output_state" == "complete" ]]; then
+    preserved_output_sha256="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).outputSha256)' \
+        "$preserved_guard_metadata"
+    )"
+    preserved_output_sidecar_sha256="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).outputRecoverySidecarSha256)' \
+        "$preserved_guard_metadata"
+    )"
+  elif [[ "$preserved_output_state" == "invalid" ]]; then
+    fail "The guarded Forge workspace contains an incomplete or unsafe public/private output pair. Inspect it without signing."
+  fi
+  preserved_workspace="$(
+    node -e 'process.stdout.write(JSON.parse(process.argv[1]).sealedWorkspace)' \
+      "$preserved_guard_metadata"
+  )"
+  preserved_full_tree_dirty="$(
+    node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).fullTreeDirty))' \
+      "$preserved_guard_metadata"
+  )"
+  if [[ "$preserved_output_state" == "complete" &&
+    "$preserved_operation" == "resume" &&
+    "$preserved_input_sha256" == "$preserved_output_sha256" ]]; then
+    fail "The preserved resume attempt did not produce a distinct artifact transition. Inspect the account nonce and chain receipts before clearing the shared guard."
+  fi
+  clear_inflight_after_reconcile="false"
+  committed_sidecar_sha256="none"
+  if [[ "$existing_manifest_recovery_sidecar_state" == "valid" ]]; then
+    committed_sidecar_sha256="$(
+      node -e 'process.stdout.write(JSON.parse(process.argv[1]).sha256)' \
+        "$existing_manifest_recovery_sidecar"
+    )"
+  fi
+  if [[ "$preserved_output_state" == "absent" ]]; then
+    [[ "$existing_manifest_has_transition_provenance" == "true" &&
+      "$existing_manifest_broadcast_sha256" != "none" &&
+      "$existing_manifest_broadcast_sha256" != "invalid" &&
+      "$committed_sidecar_sha256" != "none" ]] ||
+      fail "The guarded Forge attempt has no complete sealed output pair or committed transition. Reconcile the deployer nonce and receipts before any explicit operator recovery."
+    clear_inflight_after_reconcile="true"
+  elif [[ "$existing_manifest_broadcast_sha256" == "$preserved_output_sha256" &&
+    "$committed_sidecar_sha256" == "$preserved_output_sidecar_sha256" &&
+    "$existing_manifest_has_transition_provenance" == "true" ]]; then
+    clear_inflight_after_reconcile="true"
+  else
+    preserved_previous_artifact="-"
+    preserved_previous_sidecar="-"
+    if [[ "$preserved_operation" == "resume" ]]; then
+      preserved_previous_artifact="$canonical_broadcast_dir/run-$preserved_input_sha256.json"
+      preserved_previous_sidecar="$canonical_recovery_cache_dir/run-$preserved_input_sidecar_sha256.json"
+      [[ -f "$preserved_previous_artifact" &&
+        ! -L "$preserved_previous_artifact" &&
+        -f "$preserved_previous_sidecar" &&
+        ! -L "$preserved_previous_sidecar" ]] ||
+        fail "Interrupted resume recovery requires both exact content-addressed predecessor artifacts."
+    fi
+    recovery_manifest_path="$preserved_workspace/.giwapay-evidence/recovery-manifest-$deployment_lock_token.json"
+    recovery_evidence_dir="$preserved_workspace/.giwapay-evidence/recovery-$deployment_lock_token"
+    mkdir -p "$(dirname "$recovery_manifest_path")" "$recovery_evidence_dir"
+    node -e '
+      const fs = require("node:fs");
+      const [source, destination] = process.argv.slice(1);
+      const bytes = fs.readFileSync(source);
+      fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+    ' "$sealed_manifest_path" "$recovery_manifest_path" ||
+      fail "Could not stage the committed manifest inside the preserved Forge workspace."
+    preserved_configuration="$(
+      node -e 'process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).configuration))' \
+        "$preserved_guard_metadata"
+    )"
+    recovered_transition_result="$(
+      DEPLOYER_ADDRESS="$(
+        node -e 'process.stdout.write(JSON.parse(process.argv[1]).deployerAddress)' \
+          "$preserved_configuration"
+      )" \
+      ADAPTER_MANAGER_ADDRESS="$(
+        node -e 'process.stdout.write(JSON.parse(process.argv[1]).adapterManagerAddress)' \
+          "$preserved_configuration"
+      )" \
+      PLATFORM_FEE_RECIPIENT="$(
+        node -e 'process.stdout.write(JSON.parse(process.argv[1]).platformFeeRecipient)' \
+          "$preserved_configuration"
+      )" \
+      PLATFORM_FEE_BPS="$(
+        node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).platformFeeBps))' \
+          "$preserved_configuration"
+      )" \
+      PRODUCTION_MODE="$(
+        node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).productionMode))' \
+          "$preserved_configuration"
+      )" \
+      DEPLOY_TEST_MOCKS="$(
+        node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).deployTestMocks))' \
+          "$preserved_configuration"
+      )" \
+      node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+        capture \
+        "$recovery_manifest_path" \
+        "$preserved_workspace/packages/contracts/broadcast/DeployGiwaSepolia.s.sol/$expected_chain_id/run-latest.json" \
+        "$preserved_workspace/packages/contracts/cache/DeployGiwaSepolia.s.sol/$expected_chain_id/run-latest.json" \
+        "$preserved_previous_artifact" \
+        "$preserved_previous_sidecar" \
+        "$git_common_dir_realpath" \
+        "$canonical_broadcast_dir" \
+        "$canonical_recovery_cache_dir" \
+        "$recovery_evidence_dir" \
+        "$inflight_guard_path" \
+        "$preserved_operation" \
+        255 \
+        "$source_commit" \
+        "$evidence_tooling_commit" \
+        "$preserved_full_tree_dirty"
+    )" ||
+      fail "The preserved Forge workspace could not be converted into a reviewed transition. Inspect the guard and on-chain account state; do not rebroadcast."
+    recovered_transition_changed="$(
+      node -e '
+        const result = JSON.parse(process.argv[1]);
+        process.stdout.write(result.changed === true ? "true" : "false");
+      ' "$recovered_transition_result"
+    )"
+    [[ "$recovered_transition_changed" == "true" ]] ||
+      fail "The preserved Forge output contains no monotonic artifact transition; the in-flight guard remains unresolved."
+    sealed_manifest_path="$recovery_manifest_path"
+    publish_sealed_manifest
+    echo "Recovered the interrupted Forge output without signing. Commit and review $manifest_path, then run reconciliation again."
+    exit 0
+  fi
+fi
 
 if ! (
-  cd "$contracts_dir"
+  cd "$sealed_contracts_dir"
   forge config --json
 ) | node -e '
   let input = "";
@@ -423,6 +1204,20 @@ else
 fi
 
 giwa_rpc_url="${GIWA_RPC_URL:-https://sepolia-rpc.giwa.io}"
+giwa_rpc_url_sha256="$(
+  node -e '
+    process.stdout.write(
+      require("node:crypto")
+        .createHash("sha256")
+        .update(process.argv[1])
+        .digest("hex"),
+    );
+  ' "$giwa_rpc_url"
+)"
+if [[ "$operation" == "resume" ]]; then
+  [[ "${recorded_sidecar_rpc_url_sha256:-}" == "$giwa_rpc_url_sha256" ]] ||
+    fail "Resume must use the exact RPC endpoint bound to the private Foundry cache sidecar."
+fi
 actual_chain_id="$(ETH_RPC_URL="$giwa_rpc_url" cast chain-id)"
 [[ "$actual_chain_id" == "$expected_chain_id" ]] ||
   fail "Refusing to continue: configured RPC reported chain ID $actual_chain_id, expected $expected_chain_id."
@@ -495,15 +1290,18 @@ fi
 
 validate_recovery_manifest() {
   local expected_status="$1"
+  local require_resume_authorization="${2:-false}"
   node -e '
     const crypto = require("node:crypto");
     const fs = require("node:fs");
+    const path = require("node:path");
     const [
       manifestPath,
       broadcastPath,
       sourceCommit,
       evidenceToolingCommit,
       expectedStatus,
+      requireResumeAuthorization,
     ] = process.argv.slice(1);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
     const broadcast = fs.readFileSync(broadcastPath);
@@ -536,6 +1334,15 @@ validate_recovery_manifest() {
       failures.push("evidence tooling SHA");
     }
     if (manifest.broadcastArtifact?.sha256 !== digest) failures.push("broadcast SHA-256");
+    if (manifest.broadcastArtifact?.fileName !== path.basename(broadcastPath)) {
+      failures.push("broadcast artifact file name");
+    }
+    if (
+      requireResumeAuthorization === "true" &&
+      manifest.broadcastArtifact?.resumeAuthorized !== true
+    ) {
+      failures.push("resume authorization provenance");
+    }
     if (embeddedCommit === null || !reviewedCommit.startsWith(embeddedCommit)) {
       failures.push("embedded broadcast source SHA");
     }
@@ -569,28 +1376,78 @@ validate_recovery_manifest() {
       process.exit(1);
     }
   ' \
-    "$manifest_path" \
-    "$broadcast_path" \
+    "$sealed_manifest_path" \
+    "$sealed_broadcast_path" \
     "$source_commit" \
     "$evidence_tooling_commit" \
-    "$expected_status" ||
+    "$expected_status" \
+    "$require_resume_authorization" ||
     fail "Recovery preflight rejected the manifest or broadcast artifact before Forge was invoked."
 }
 
 if [[ "$operation" == "resume" ]]; then
-  validate_recovery_manifest "broadcast-partial"
+  validate_recovery_manifest "broadcast-partial" "true"
 elif [[ "$operation" == "verify" ]]; then
   validate_recovery_manifest "broadcast-complete"
 fi
 
+sealed_forge_broadcast_path="$sealed_broadcast_dir/run-latest.json"
+sealed_forge_recovery_sidecar_path="$sealed_recovery_cache_dir/run-latest.json"
+if [[ "$operation" == "resume" && "$sealed_broadcast_path" != "$sealed_forge_broadcast_path" ]]; then
+  node -e '
+    const fs = require("node:fs");
+    const [source, destination] = process.argv.slice(1);
+    const bytes = fs.readFileSync(source);
+    fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+  ' "$sealed_broadcast_path" "$sealed_forge_broadcast_path" ||
+    fail "The authorized recovery artifact could not be staged for isolated resume."
+fi
+if [[ "$operation" == "resume" ]]; then
+  [[ -n "$sealed_recovery_sidecar_path" ]] ||
+    fail "The authorized private recovery sidecar is unavailable."
+  node -e '
+    const fs = require("node:fs");
+    const [source, destination] = process.argv.slice(1);
+    const bytes = fs.readFileSync(source);
+    fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o600 });
+  ' "$sealed_recovery_sidecar_path" "$sealed_forge_recovery_sidecar_path" ||
+    fail "The authorized private recovery sidecar could not be staged for isolated resume."
+  node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+    validate \
+    "$sealed_manifest_path" \
+    "$sealed_broadcast_path" \
+    "$sealed_recovery_sidecar_path" \
+    "$git_common_dir_realpath" \
+    "$canonical_broadcast_dir" \
+    "$canonical_recovery_cache_dir" \
+    "$giwa_rpc_url_sha256" >/dev/null ||
+    fail "Resume requires a committed wrapper transition with matching public artifact, private cache sidecar, and journal."
+fi
+if [[ "$operation" == "verify" && "$existing_manifest_resume_authorized" == "true" ]]; then
+  [[ -n "$sealed_recovery_sidecar_path" ]] ||
+    fail "Verification cannot preserve resume authorization without its private recovery sidecar."
+  node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+    validate \
+    "$sealed_manifest_path" \
+    "$sealed_broadcast_path" \
+    "$sealed_recovery_sidecar_path" \
+    "$git_common_dir_realpath" \
+    "$canonical_broadcast_dir" \
+    "$canonical_recovery_cache_dir" \
+    "$giwa_rpc_url_sha256" >/dev/null ||
+    fail "Verification cannot preserve an invalid recovery provenance chain."
+fi
+
 run_extractor() {
   local verification_requested_value="${1:-}"
+  local resume_authorized_value="${2:-$current_resume_authorized}"
   DEPLOYMENT_SOURCE_COMMIT="$source_commit" \
     DEPLOYMENT_EVIDENCE_TOOLING_COMMIT="$evidence_tooling_commit" \
     DEPLOYMENT_RPC_URL="$giwa_rpc_url" \
     DEPLOYMENT_EXPLORER_BASE_URL="${GIWA_EXPLORER_URL:-https://sepolia-explorer.giwa.io}" \
     DEPLOYMENT_VERIFIER_URL="${GIWA_EXPLORER_API_URL:-https://sepolia-explorer.giwa.io/api}" \
     DEPLOYMENT_VERIFICATION_REQUESTED="$verification_requested_value" \
+    DEPLOYMENT_RESUME_AUTHORIZED="$resume_authorized_value" \
     DEPLOYMENT_QUERY_ONCHAIN_CONFIGURATION=true \
     DEPLOYMENT_SCOPE_DIRTY="$deployment_scope_dirty_evidence" \
     DEPLOYMENT_FULL_TREE_DIRTY="$full_tree_dirty_evidence" \
@@ -601,12 +1458,13 @@ run_extractor() {
     PRODUCTION_MODE="${PRODUCTION_MODE:-}" \
     DEPLOY_TEST_MOCKS="${DEPLOY_TEST_MOCKS:-}" \
     DEPLOYER_BALANCE_WEI="$deployer_balance_wei" \
-    node "$repository_root/scripts/extract-deployment.mjs" \
-    "$broadcast_path" \
-    "$manifest_path" \
+    node "$sealed_repository_root/scripts/extract-deployment.mjs" \
+    "$sealed_broadcast_path" \
+    "$sealed_manifest_path" \
     "$expected_chain_id" \
     giwa-sepolia \
-    --public
+    --public || return 1
+  publish_sealed_manifest
 }
 
 read_manifest_field() {
@@ -617,7 +1475,7 @@ read_manifest_field() {
     const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
     const value = field.split(".").reduce((cursor, key) => cursor?.[key], manifest);
     if (typeof value === "string") process.stdout.write(value);
-  ' "$manifest_path" "$field"
+  ' "$sealed_manifest_path" "$field"
 }
 
 if [[ "$operation" == "reconcile" ]]; then
@@ -626,8 +1484,39 @@ if [[ "$operation" == "reconcile" ]]; then
     [[ "$reconcile_verification_requested" == "true" || "$reconcile_verification_requested" == "false" ]] ||
       fail "RECONCILE_VERIFICATION_REQUESTED must be true or false when set."
   fi
-  run_extractor "$reconcile_verification_requested" ||
+  reconcile_resume_authorized="false"
+  case "$existing_manifest_resume_authorized" in
+    true) reconcile_resume_authorized="true" ;;
+    false | none) ;;
+    *) fail "Reconciliation requires a boolean resume authorization state." ;;
+  esac
+  if [[ "$existing_manifest_status" == "broadcast-transition" ||
+    "$existing_manifest_resume_authorized" == "true" ||
+    "$existing_manifest_has_transition_provenance" == "true" ]]; then
+    [[ -n "$sealed_recovery_sidecar_path" ]] ||
+      fail "The committed transition is missing its private recovery sidecar."
+    node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+      validate \
+      "$sealed_manifest_path" \
+      "$sealed_broadcast_path" \
+      "$sealed_recovery_sidecar_path" \
+      "$git_common_dir_realpath" \
+      "$canonical_broadcast_dir" \
+      "$canonical_recovery_cache_dir" \
+      "$giwa_rpc_url_sha256" >/dev/null ||
+      fail "The committed transition journal does not authorize this recovered artifact."
+    reconcile_resume_authorized="true"
+  fi
+  current_resume_authorized="$reconcile_resume_authorized"
+  run_extractor "$reconcile_verification_requested" "$reconcile_resume_authorized" ||
     fail "Reconciliation could not refresh the public manifest. The private broadcast artifact was not modified."
+  if [[ "${clear_inflight_after_reconcile:-false}" == "true" ]]; then
+    node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+      complete \
+      "$inflight_guard_path" \
+      "$preserved_attempt_token" ||
+      fail "Reconciliation succeeded, but the shared in-flight guard could not be closed."
+  fi
   echo "Reconciliation completed without broadcasting. Review $manifest_path."
   exit 0
 fi
@@ -644,23 +1533,110 @@ if [[ "$operation" != "verify" ]]; then
     forge_arguments+=(--resume)
   fi
 
+  inflight_input_sha256="none"
+  inflight_input_sidecar_sha256="none"
+  if [[ "$operation" == "resume" ]]; then
+    inflight_input_sha256="$existing_manifest_broadcast_sha256"
+    inflight_input_sidecar_sha256="$recorded_sidecar_sha256"
+  fi
+  inflight_guard_path="$(
+    DEPLOYER_ADDRESS="${DEPLOYER_ADDRESS:-}" \
+    ADAPTER_MANAGER_ADDRESS="${ADAPTER_MANAGER_ADDRESS:-}" \
+    PLATFORM_FEE_RECIPIENT="${PLATFORM_FEE_RECIPIENT:-}" \
+    PLATFORM_FEE_BPS="${PLATFORM_FEE_BPS:-}" \
+    PRODUCTION_MODE="${PRODUCTION_MODE:-}" \
+    DEPLOY_TEST_MOCKS="${DEPLOY_TEST_MOCKS:-}" \
+    node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+      begin \
+      "$git_common_dir_realpath" \
+      "$canonical_broadcast_dir" \
+      "$canonical_recovery_cache_dir" \
+      "$inflight_guard_path" \
+      "$deployment_lock_token" \
+      "$operation" \
+      "$source_commit" \
+      "$evidence_tooling_commit" \
+      "$inflight_input_sha256" \
+      "$inflight_input_sidecar_sha256" \
+      "$sealed_repository_root" \
+      "$full_tree_dirty_evidence" \
+      "$giwa_rpc_url_sha256"
+  )" || fail "Could not durably record the in-flight deployment guard before signing."
+
   set +e
   (
-    cd "$contracts_dir"
+    cd "$sealed_contracts_dir"
     ETH_RPC_URL="$giwa_rpc_url" forge script "${forge_arguments[@]}"
   )
   broadcast_exit_code=$?
   set -e
 
-  if [[ -f "$broadcast_path" ]]; then
-    run_extractor "" ||
-      fail "The broadcast artifact was preserved, but public evidence extraction failed. Do not rerun; repair the extractor and reconcile."
+  if [[ -f "$sealed_forge_broadcast_path" &&
+    -f "$sealed_forge_recovery_sidecar_path" ]]; then
+    previous_transition_artifact="-"
+    previous_transition_sidecar="-"
+    if [[ "$operation" == "resume" ]]; then
+      previous_transition_artifact="$sealed_broadcast_path"
+      previous_transition_sidecar="$sealed_recovery_sidecar_path"
+    fi
+    transition_result="$(
+      DEPLOYER_ADDRESS="${DEPLOYER_ADDRESS:-}" \
+      ADAPTER_MANAGER_ADDRESS="${ADAPTER_MANAGER_ADDRESS:-}" \
+      PLATFORM_FEE_RECIPIENT="${PLATFORM_FEE_RECIPIENT:-}" \
+      PLATFORM_FEE_BPS="${PLATFORM_FEE_BPS:-}" \
+      PRODUCTION_MODE="${PRODUCTION_MODE:-}" \
+      DEPLOY_TEST_MOCKS="${DEPLOY_TEST_MOCKS:-}" \
+      node "$sealed_repository_root/scripts/capture-deployment-transition.mjs" \
+      capture \
+      "$sealed_manifest_path" \
+      "$sealed_forge_broadcast_path" \
+      "$sealed_forge_recovery_sidecar_path" \
+      "$previous_transition_artifact" \
+      "$previous_transition_sidecar" \
+      "$git_common_dir_realpath" \
+      "$canonical_broadcast_dir" \
+      "$canonical_recovery_cache_dir" \
+      "$sealed_evidence_dir" \
+      "$inflight_guard_path" \
+      "$operation" \
+      "$broadcast_exit_code" \
+      "$source_commit" \
+      "$evidence_tooling_commit" \
+      "$full_tree_dirty_evidence"
+    )" ||
+      fail "Forge returned broadcast evidence, but its isolated transition could not be durably captured. Do not rerun."
+    transition_changed="$(
+      node -e '
+        const result = JSON.parse(process.argv[1]);
+        process.stdout.write(result.changed === true ? "true" : "false");
+      ' "$transition_result"
+    )"
+    if [[ "$transition_changed" != "true" ]]; then
+      fail "The Forge attempt produced no distinct public/private recovery transition. Inspect the account nonce and chain receipts before clearing the shared guard."
+    fi
+    sealed_broadcast_path="$(
+        node -e '
+          const result = JSON.parse(process.argv[1]);
+          if (typeof result.sealedArtifactPath !== "string") process.exit(1);
+          process.stdout.write(result.sealedArtifactPath);
+        ' "$transition_result"
+    )"
+    sealed_recovery_sidecar_path="$(
+        node -e '
+          const result = JSON.parse(process.argv[1]);
+          if (typeof result.sealedRecoverySidecarPath !== "string") process.exit(1);
+          process.stdout.write(result.sealedRecoverySidecarPath);
+        ' "$transition_result"
+    )"
+    publish_sealed_manifest
+    fail "Forge evidence was sealed without authorizing another signature. Review and commit the transition manifest, then reconcile it before verification or resume."
   fi
 
   if ((broadcast_exit_code != 0)); then
     fail "Broadcast did not complete. Existing evidence was preserved when available. Inspect it, then reconcile or explicitly resume; do not start a new deployment."
   fi
-  [[ -f "$manifest_path" ]] || fail "Broadcast returned success but no public evidence manifest was produced."
+  [[ -f "$sealed_manifest_path" ]] ||
+    fail "Broadcast returned success but no public evidence manifest was produced."
   [[ "$(read_manifest_field deploymentStatus)" == "broadcast-complete" ]] ||
     fail "Broadcast evidence is incomplete. Reconcile it before any verification or retry."
 fi
@@ -682,7 +1658,7 @@ verification_targets="$(
       }
       process.stdout.write(`${entry.contractName}\t${entry.address}\t${entry.transactionHash}\n`);
     }
-  ' "$manifest_path"
+  ' "$sealed_manifest_path"
 )" || fail "The public manifest does not contain valid per-contract verification targets."
 
 verification_exit_code=0
@@ -719,7 +1695,7 @@ while IFS=$'\t' read -r contract_name contract_address transaction_hash; do
 
   set +e
   (
-    cd "$contracts_dir"
+    cd "$sealed_contracts_dir"
     ETH_RPC_URL="$giwa_rpc_url" \
       VERIFIER_URL="${GIWA_EXPLORER_API_URL:-https://sepolia-explorer.giwa.io/api}" \
       forge verify-contract \
@@ -740,7 +1716,7 @@ while IFS=$'\t' read -r contract_name contract_address transaction_hash; do
   fi
 done <<<"$verification_targets"
 
-run_extractor true ||
+run_extractor true "$current_resume_authorized" ||
   fail "Verification returned, but public evidence refresh failed. The broadcast artifact remains the recovery source; do not redeploy."
 if ((verification_exit_code != 0)); then
   fail "The broadcast evidence is preserved, but the verification command failed. Do not redeploy; reconcile and retry verification explicitly."
@@ -777,7 +1753,7 @@ manifest_readiness="$(
         "registryReferences",
       ].every((key) => comparisons[key] === true);
     process.stdout.write(runtimeConfirmed && configurationConfirmed ? "ready" : "review-required");
-  ' "$manifest_path"
+  ' "$sealed_manifest_path"
 )"
 [[ "$manifest_readiness" == "ready" ]] ||
   fail "Explorer verification is confirmed, but runtime code hashes or on-chain role/fee checks remain unavailable or mismatched. Review the manifest before any application configuration."

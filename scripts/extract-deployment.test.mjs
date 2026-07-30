@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -24,6 +25,7 @@ const deploymentEnvironmentNames = [
   'DEPLOYMENT_EXPLORER_BASE_URL',
   'DEPLOYMENT_VERIFIER_URL',
   'DEPLOYMENT_VERIFICATION_REQUESTED',
+  'DEPLOYMENT_RESUME_AUTHORIZED',
   'DEPLOYMENT_QUERY_ONCHAIN_CONFIGURATION',
   'DEPLOYMENT_SCOPE_DIRTY',
   'DEPLOYMENT_FULL_TREE_DIRTY',
@@ -115,6 +117,7 @@ test('emits sanitized complete public evidence and uses receipt-address correlat
   assert.equal(manifest.sourceCommit, sourceCommit);
   assert.equal(manifest.evidenceToolingCommit, sourceCommit);
   assert.equal(manifest.broadcastArtifact.sourceCommit, sourceCommit.slice(0, 7));
+  assert.equal(manifest.broadcastArtifact.resumeAuthorized, false);
   assert.equal(manifest.earliestIndexedBlock, '100');
   assert.equal(manifest.configuration.platformFeeBps, 50);
   assert.equal(manifest.configuration.productionMode, true);
@@ -147,6 +150,67 @@ test('records a distinct reviewed evidence tooling commit in lowercase', async (
   assert.equal(manifest.evidenceToolingCommit, evidenceToolingCommit.toLowerCase());
 });
 
+test('authorizes partial resume only with complete matching prior provenance', async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), 'giwapay-manifest-'));
+  context.after(() => rm(directory, { recursive: true, force: true }));
+  const output = join(directory, 'resume-authorized.json');
+  const fixture = resolve(fixturesDirectory, 'core-success.json');
+  const fixtureBytes = await readFile(fixture);
+  const broadcastSha256 = createHash('sha256').update(fixtureBytes).digest('hex');
+  const sidecarSha256 = 'a'.repeat(64);
+  await writeFile(
+    output,
+    `${JSON.stringify({
+      schemaVersion: 2,
+      project: 'GiwaPay',
+      chainId: 91342,
+      mode: 'giwa-sepolia',
+      broadcastArtifact: {
+        sha256: broadcastSha256,
+        resumeAuthorized: false,
+        recoverySidecar: {
+          fileName: `run-${sidecarSha256}.json`,
+          sha256: sidecarSha256,
+          publicArtifactSha256: broadcastSha256,
+          rpcUrlSha256: 'b'.repeat(64),
+          storage: 'foundry-cache-private',
+        },
+        resumePolicy: {
+          schemaVersion: 1,
+          kind: 'content-addressed-foundry-sensitive-sequence',
+          forgeVersion: '1.7.1',
+          forgeCommit: '4072e48705af9d93e3c0f6e29e93b5e9a40caed8',
+          rpcUrlSha256: 'b'.repeat(64),
+          transactionCount: 4,
+          recoverySidecarSha256: sidecarSha256,
+        },
+        transitionJournal: {
+          fileName: `transition-${'c'.repeat(64)}.json`,
+          sha256: 'c'.repeat(64),
+          operation: 'deploy',
+          previousArtifactSha256: null,
+          previousRecoverySidecarSha256: null,
+          inflightGuardSha256: 'd'.repeat(64),
+          signingEvidenceToolingCommit: sourceCommit,
+          evidenceToolingCommit: sourceCommit,
+        },
+      },
+    })}\n`,
+  );
+
+  await runExtractor({
+    fixture,
+    output,
+    environment: {
+      DEPLOYMENT_SOURCE_COMMIT: sourceCommit,
+      DEPLOYMENT_RESUME_AUTHORIZED: 'true',
+    },
+  });
+  const manifest = JSON.parse(await readFile(output, 'utf8'));
+
+  assert.equal(manifest.broadcastArtifact.resumeAuthorized, true);
+});
+
 test('records partial broadcast evidence without claiming completion or verification', async (context) => {
   const directory = await mkdtemp(join(tmpdir(), 'giwapay-manifest-'));
   context.after(() => rm(directory, { recursive: true, force: true }));
@@ -157,6 +221,7 @@ test('records partial broadcast evidence without claiming completion or verifica
     output,
     environment: {
       DEPLOYMENT_SOURCE_COMMIT: sourceCommit,
+      DEPLOYMENT_RESUME_AUTHORIZED: 'true',
       DEPLOYMENT_VERIFICATION_REQUESTED: 'false',
     },
   });
@@ -168,6 +233,11 @@ test('records partial broadcast evidence without claiming completion or verifica
   assert.equal(manifest.configuration.deployTestMocks, null);
   assert.equal(manifest.mockReadiness.status, 'unknown');
   assert.equal(manifest.verification.status, 'not-requested');
+  assert.equal(
+    manifest.broadcastArtifact.resumeAuthorized,
+    false,
+    'an environment flag without preserved provenance must not authorize resume',
+  );
 });
 
 test('does not infer no-mock mode from an otherwise complete core broadcast', async (context) => {

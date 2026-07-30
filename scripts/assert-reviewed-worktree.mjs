@@ -1,8 +1,8 @@
+import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
-import { isAbsolute, normalize, resolve, sep } from 'node:path';
+import { chmod, lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, normalize, resolve, sep } from 'node:path';
 import process from 'node:process';
-import { tmpdir } from 'node:os';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -166,37 +166,20 @@ async function materializeReviewedScope(root, commit, paths, destination) {
     assertSafeTreePath(path, destinationRealPath);
   }
 
-  const archiveDirectory = await mkdtemp(joinTemporaryPath('giwapay-reviewed-archive-'));
-  const archivePath = resolve(archiveDirectory, 'scope.tar');
-  try {
-    await git(root, [
-      'archive',
-      '--format=tar',
-      `--output=${archivePath}`,
-      commit,
-      ...pathArguments,
-    ]);
-    await execFileAsync('tar', ['-xf', archivePath, '-C', destinationRealPath], {
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024,
-    });
-  } finally {
-    await rm(archiveDirectory, { recursive: true, force: true });
-  }
-
   for (const [path, reviewedEntry] of reviewedTree) {
     const materializedPath = resolve(destinationRealPath, path);
     if (reviewedEntry.mode === '160000') {
       const submoduleRoot = resolve(root, path);
       await mkdir(materializedPath, { recursive: true, mode: 0o700 });
-      await materializeReviewedScope(
-        submoduleRoot,
-        reviewedEntry.object,
-        [],
-        materializedPath,
-      );
+      await materializeReviewedScope(submoduleRoot, reviewedEntry.object, [], materializedPath);
       continue;
     }
+    await mkdir(dirname(materializedPath), { recursive: true, mode: 0o700 });
+    const reviewedBytes = await gitBytes(root, ['cat-file', 'blob', reviewedEntry.object]);
+    await writeFile(materializedPath, reviewedBytes, {
+      flag: 'wx',
+      mode: reviewedEntry.mode === '100755' ? 0o500 : 0o400,
+    });
     const materializedStats = await lstat(materializedPath);
     if (!materializedStats.isFile() || materializedStats.isSymbolicLink()) {
       throw new Error(`materialized reviewed path is not a regular file: ${path}`);
@@ -218,11 +201,6 @@ function assertSafeTreePath(path, destination) {
   ) {
     throw new Error(`unsafe reviewed tree path: ${path}`);
   }
-}
-
-function joinTemporaryPath(prefix) {
-  const base = resolve(tmpdir());
-  return `${base}${sep}${prefix}`;
 }
 
 async function assertNoHistoryOverrides(root) {
@@ -300,5 +278,24 @@ async function git(root, arguments_) {
         ? `: ${error.stderr.trim()}`
         : '';
     throw new Error(`reviewed Git scope check failed (${arguments_.join(' ')})${detail}`);
+  }
+}
+
+async function gitBytes(root, arguments_) {
+  try {
+    const { stdout } = await execFileAsync('git', arguments_, {
+      cwd: root,
+      env: gitEnvironment,
+      encoding: null,
+      timeout: 15_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (error) {
+    const detail =
+      Buffer.isBuffer(error?.stderr) && error.stderr.length > 0
+        ? `: ${error.stderr.toString('utf8').trim()}`
+        : '';
+    throw new Error(`reviewed Git blob materialization failed (${arguments_.join(' ')})${detail}`);
   }
 }
