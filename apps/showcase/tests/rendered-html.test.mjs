@@ -39,6 +39,7 @@ test('server-renders the public GiwaPay showcase', async () => {
   assert.match(html, /결제는 자유롭게.*정산은.*정확하게/s);
   assert.match(html, /Three steps\. That is it\./);
   assert.match(html, /Explore the repository/);
+  assert.match(html, /Read the GASOK brief/);
   assert.match(html, /Testnet checkout preview/);
   assert.match(html, /Live GIWA Sepolia contracts and payment execution are not deployed yet/);
   assert.match(html, /https:\/\/github\.com\/eomyunsig-debug\/giwapay/);
@@ -57,6 +58,24 @@ test('keeps operating and security detail in a closed native disclosure', async 
   assert.match(html, /Merchant signed/);
   assert.match(html, /Independent verification/);
   assert.match(html, /SECURITY BOUNDARIES/);
+});
+
+test('explains GIWA fit without claiming unreleased or exchange integrations', async () => {
+  const response = await render();
+  const html = await response.text();
+
+  assert.match(html, /WHY GIWA/);
+  assert.match(html, /Built for the ecosystem GIWA says it is building/);
+  assert.match(html, /GIWA SEPOLIA TESTNET AVAILABLE/);
+  assert.match(html, /OFFICIAL ECOSYSTEM · NOT INTEGRATED/);
+  assert.match(html, /GIWA testnet is separate from the Upbit exchange service/);
+  assert.match(html, /giwa-ecosystem\/dojang/);
+  assert.match(html, /giwa-ecosystem\/giwa-id/);
+  assert.match(html, /giwa-wallet-embedded-mode\.md/);
+  assert.match(html, /gasok-one-pager\.md/);
+  assert.match(html, /market-opportunity\.md/);
+  assert.doesNotMatch(html, /GIWA Wallet integration complete/i);
+  assert.doesNotMatch(html, /Upbit liquidity/i);
 });
 
 test('does not present a fake checkout success or wallet action', async () => {
