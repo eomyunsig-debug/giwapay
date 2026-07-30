@@ -13,8 +13,8 @@ lists **2026-07-31 23:59:59**, but the notice does not state a time zone and the
 form time zone was not independently verified in this review. Treat July 31 as
 a hard deadline and submit well before the listed time. Phase 1 and Phase 2 are
 combined, so the current application evaluates both the idea and implemented
-MVP. The notice says selected teams will be contacted at their application
-email by **2026-08-14**.
+MVP. The notice says selection results will be announced by **2026-08-14** and
+sent separately to the application email.
 
 Sources:
 
@@ -259,11 +259,15 @@ Do not invent team information. The Korean form requires a reachable email and
 a public team-introduction link containing these fields:
 
 - Applicant or team-member name: `[required]`
-- Contact email: `[required]`
 - Role and responsibilities: `[required]`
 - Nationality: `[required]`
 - Relevant career and project history: `[required]`
 - Core strength: `[required]`
+
+Enter the reachable contact email directly in the separate team-email field.
+The following readiness facts are not listed as team-introduction fields in the
+public form definition and must not be presented as form requirements:
+
 - Advisor or merchant references: `[none confirmed in repository]`
 - Availability through the October 2026 Demo Day: `[applicant confirmation
 needed before submission]`
