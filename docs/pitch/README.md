@@ -5,6 +5,12 @@
 - `GiwaPay-GASOK-Pitch-Deck.pptx`
 - `GiwaPay-GASOK-Pitch-Deck.pdf`
 
+Final artifact SHA-256 values pinned by commit
+`e17ca73ec46033636c3b98b000075334116a8b7f`:
+
+- PPTX: `23cc06329208b4e8aacdbcef1e14386ea8ee9f182ea24ed1939d536599c3eb6e`
+- PDF: `68118134f025fb15c4a38bafc17971d0a162259874116e5b268ffc149a50155b`
+
 The deck intentionally shows the verified GIWA testnet contract as
 `PENDING`. Replace that state only after the production-mode deployment,
 GIWA Explorer source verification, and public deployment manifest are real.
