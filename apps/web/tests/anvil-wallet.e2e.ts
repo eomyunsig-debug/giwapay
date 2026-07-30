@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { expect, test, type Page } from '@playwright/test';
-import { getAddress, type Address, type Hex } from 'viem';
+import type { Address, Hex } from 'viem';
 
 import {
   assertAnvilWalletBridgeRejectsUnauthorizedCall,
@@ -319,6 +319,7 @@ test('records one real local wallet payment through canonical indexer verificati
   await paceVideo(page);
 
   await page.getByRole('button', { name: 'Connect wallet', exact: true }).click();
+  await paceVideo(page);
   await page.getByRole('button', { name: 'GiwaPay Anvil test wallet', exact: true }).click();
   const authorizedAccounts = await page.evaluate(async () => {
     const provider = Reflect.get(window, 'ethereum') as
@@ -411,6 +412,8 @@ test('records one real local wallet payment through canonical indexer verificati
   const payer = page
     .locator('.gp-definition-row')
     .filter({ has: page.locator('dt', { hasText: 'Paid from' }) });
-  await expect(payer.locator('dd')).toHaveText(getAddress(state.payerAddress));
+  const displayedPayer = payer.locator('dd');
+  await expect(displayedPayer).toHaveText(addressPattern);
+  expect(sameAddress((await displayedPayer.innerText()).trim(), state.payerAddress)).toBe(true);
   await paceVideo(page, 1_000);
 });
