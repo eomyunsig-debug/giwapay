@@ -1,3 +1,5 @@
+import { createHmac } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,6 +12,15 @@ import {
   secretDigest,
   signWebhook,
 } from './crypto.js';
+
+const base64UrlAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+function nonCanonicalBase64UrlAlias(value: string): string {
+  if (value.length % 4 === 0) throw new Error('Fixture has no unused base64url bits');
+  const finalIndex = base64UrlAlphabet.indexOf(value.at(-1)!);
+  if (finalIndex < 0) throw new Error('Fixture is not base64url');
+  return `${value.slice(0, -1)}${base64UrlAlphabet[finalIndex + 1]}`;
+}
 
 describe('secret handling', () => {
   it('encrypts webhook secrets with authenticated encryption', () => {
@@ -44,6 +55,29 @@ describe('secret handling', () => {
       expiresAt: 123,
     });
     expect(decodeSignedPayload(`${token}x`, secret)).toBeUndefined();
+  });
+
+  it('rejects a non-canonical base64url alias of the same signature bytes', () => {
+    const secret = 'q'.repeat(32);
+    const token = encodeSignedPayload({ amount: '100', expiresAt: 123 }, secret);
+    const [payload, signature] = token.split('.');
+    if (!payload || !signature) throw new Error('Malformed signed-payload fixture');
+
+    const alias = nonCanonicalBase64UrlAlias(signature);
+    expect(Buffer.from(alias, 'base64url')).toEqual(Buffer.from(signature, 'base64url'));
+    expect(decodeSignedPayload(`${payload}.${alias}`, secret)).toBeUndefined();
+  });
+
+  it('rejects a valid signature over a non-canonical payload encoding', () => {
+    const secret = 'q'.repeat(32);
+    const token = encodeSignedPayload({ amount: '100', expiresAt: 123 }, secret);
+    const [payload] = token.split('.');
+    if (!payload) throw new Error('Malformed signed-payload fixture');
+
+    const alias = nonCanonicalBase64UrlAlias(payload);
+    expect(Buffer.from(alias, 'base64url')).toEqual(Buffer.from(payload, 'base64url'));
+    const signature = createHmac('sha256', secret).update(alias, 'utf8').digest('base64url');
+    expect(decodeSignedPayload(`${alias}.${signature}`, secret)).toBeUndefined();
   });
 
   it('derives domain-separated keys from the session root', () => {

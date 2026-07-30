@@ -260,8 +260,11 @@ run('PaymentIntent route integration', () => {
     });
     expect(quote.statusCode).toBe(200);
     const quoteId = quote.json<{ quoteId: string }>().quoteId;
-    const final = quoteId.at(-1);
-    const tampered = `${quoteId.slice(0, -1)}${final === 'A' ? 'B' : 'A'}`;
+    const [payload, signature] = quoteId.split('.');
+    if (!payload || !signature) throw new Error('Malformed quote envelope fixture');
+    const signatureBytes = Buffer.from(signature, 'base64url');
+    signatureBytes[0] = signatureBytes[0]! ^ 1;
+    const tampered = `${payload}.${signatureBytes.toString('base64url')}`;
     await new Promise((resolve) => setTimeout(resolve, 275));
     const callsBeforePrepare = chainCalls;
 
