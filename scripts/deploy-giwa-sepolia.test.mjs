@@ -125,6 +125,7 @@ async function createHarness(context, { status = 'broadcast-complete' } = {}) {
 case "$*" in
   *"rev-parse HEAD"*) printf '%s\\n' "$FAKE_SOURCE_COMMIT" ;;
   *"ls-files --error-unmatch"*) [ "\${FAKE_MANIFEST_TRACKED:-true}" = "true" ] ;;
+  *"cat-file -e"*) [ "\${FAKE_SOURCE_COMMIT_EXISTS:-true}" = "true" ] ;;
   *"diff --quiet"*) [ "\${FAKE_SOURCE_TREE_MATCHES:-true}" = "true" ] ;;
   *"status --porcelain"*)
     if [ "\${FAKE_DEPLOYMENT_SCOPE_DIRTY:-false}" = "true" ]; then
@@ -351,6 +352,131 @@ test('NEW DEPLOY accepts only the exact reviewed not-deployed placeholder', asyn
   assert.match(await readOptional(harness.castLog), /^chain-id$/m);
   assert.match(await readOptional(harness.forgeLog), /--broadcast/);
 });
+
+test('RECONCILE establishes a clean deployment scope from a clean recovered checkout', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+
+  await execFileAsync('/bin/bash', [harness.wrapper], {
+    env: {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    },
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+  assert.equal(manifest.deploymentScopeDirty, false);
+  assert.equal(manifest.fullTreeDirty, null);
+  assert.equal(await readOptional(harness.forgeLog), '');
+
+  await runExpectingFailure(harness.wrapper, {
+    ...harness.environment,
+    VERIFY_GIWA_SEPOLIA_DEPLOY: '91342',
+  });
+  assert.match(await readOptional(harness.forgeLog), /verify-contract/);
+});
+
+test('RECONCILE preserves unknown scope evidence when the recovered checkout is dirty', async (context) => {
+  const harness = await createHarness(context);
+  await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+
+  await execFileAsync('/bin/bash', [harness.wrapper], {
+    env: {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+      FAKE_DEPLOYMENT_SCOPE_DIRTY: 'true',
+    },
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+  assert.equal(manifest.deploymentScopeDirty, null);
+  assert.equal(manifest.fullTreeDirty, null);
+  assert.equal(await readOptional(harness.forgeLog), '');
+
+  await execFileAsync('/bin/bash', [harness.wrapper], {
+    env: {
+      ...harness.environment,
+      RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+      RECONCILE_VERIFICATION_REQUESTED: 'false',
+      DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+    },
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024,
+  });
+
+  const reviewedManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+  assert.equal(reviewedManifest.deploymentScopeDirty, false);
+  assert.equal(reviewedManifest.fullTreeDirty, null);
+});
+
+for (const invalidSourceEvidence of [
+  {
+    name: 'source differs from the recorded commit',
+    environment: { FAKE_SOURCE_TREE_MATCHES: 'false' },
+  },
+  {
+    name: 'recorded source commit is unavailable',
+    environment: { FAKE_SOURCE_COMMIT_EXISTS: 'false' },
+  },
+  {
+    name: 'the public manifest is untracked',
+    environment: { FAKE_MANIFEST_TRACKED: 'false' },
+  },
+]) {
+  test(`RECONCILE preserves unknown scope evidence when ${invalidSourceEvidence.name}`, async (context) => {
+    const harness = await createHarness(context);
+    await writeFile(harness.manifestPath, `${JSON.stringify(notDeployedManifest(), null, 2)}\n`);
+
+    await execFileAsync('/bin/bash', [harness.wrapper], {
+      env: {
+        ...harness.environment,
+        RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+        RECONCILE_VERIFICATION_REQUESTED: 'false',
+        DEPLOYMENT_SOURCE_COMMIT_OVERRIDE: sourceCommit,
+        ...invalidSourceEvidence.environment,
+      },
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    });
+
+    const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+    assert.equal(manifest.deploymentScopeDirty, null);
+    assert.equal(await readOptional(harness.forgeLog), '');
+  });
+}
+
+for (const establishedScopeDirty of [false, true]) {
+  test(`RECONCILE preserves established ${establishedScopeDirty} scope evidence`, async (context) => {
+    const harness = await createHarness(context);
+    const existingManifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+    existingManifest.deploymentScopeDirty = establishedScopeDirty;
+    await writeFile(harness.manifestPath, `${JSON.stringify(existingManifest, null, 2)}\n`);
+
+    await execFileAsync('/bin/bash', [harness.wrapper], {
+      env: {
+        ...harness.environment,
+        RECONCILE_GIWA_SEPOLIA_DEPLOY: '91342',
+        RECONCILE_VERIFICATION_REQUESTED: 'false',
+        FAKE_DEPLOYMENT_SCOPE_DIRTY: 'true',
+      },
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024,
+    });
+
+    const manifest = JSON.parse(await readFile(harness.manifestPath, 'utf8'));
+    assert.equal(manifest.deploymentScopeDirty, establishedScopeDirty);
+    assert.equal(manifest.fullTreeDirty, false);
+    assert.equal(await readOptional(harness.forgeLog), '');
+  });
+}
 
 test('VERIFY invokes only non-signing forge verify-contract commands', async (context) => {
   const harness = await createHarness(context);

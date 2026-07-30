@@ -149,6 +149,20 @@ existing_manifest_source_commit="$(
     } catch {}
   ' "$manifest_path"
 )"
+existing_manifest_scope_dirty="$(
+  node -e '
+    const fs = require("node:fs");
+    const path = process.argv[1];
+    try {
+      const value = JSON.parse(fs.readFileSync(path, "utf8")).deploymentScopeDirty;
+      process.stdout.write(
+        value === true ? "true" : value === false ? "false" : value === null ? "null" : "unknown",
+      );
+    } catch {
+      process.stdout.write("unknown");
+    }
+  ' "$manifest_path"
+)"
 
 deployment_scope_status="$(
   git -C "$repository_root" status --porcelain -- \
@@ -163,12 +177,12 @@ if [[ "$operation" != "reconcile" ]] &&
   ! git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1; then
   fail "The public deployment manifest must be tracked in the reviewed commit before any broadcast or verification."
 fi
-deployment_scope_dirty_evidence="false"
-full_tree_dirty_evidence="false"
-[[ -n "$full_tree_status" ]] && full_tree_dirty_evidence="true"
-if [[ "$operation" == "reconcile" ]]; then
-  deployment_scope_dirty_evidence=""
-  full_tree_dirty_evidence=""
+deployment_scope_dirty_evidence=""
+full_tree_dirty_evidence=""
+if [[ "$operation" != "reconcile" ]]; then
+  deployment_scope_dirty_evidence="false"
+  full_tree_dirty_evidence="false"
+  [[ -n "$full_tree_status" ]] && full_tree_dirty_evidence="true"
 fi
 
 if [[ "$operation" == "deploy" ]]; then
@@ -199,6 +213,15 @@ else
     [[ "$(lowercase "$source_commit")" != "$(lowercase "$current_source_commit")" ]] &&
     ! git -C "$repository_root" diff --quiet "$source_commit" -- "${deployment_source_paths[@]}"; then
     fail "Resume and verification require deployment source identical to the recorded source commit; only reviewed evidence-only commits may follow it."
+  fi
+fi
+if [[ "$operation" == "reconcile" ]]; then
+  if [[ "$existing_manifest_scope_dirty" == "null" ]] &&
+    [[ -z "$deployment_scope_status" ]] &&
+    git -C "$repository_root" ls-files --error-unmatch "$manifest_relative_path" >/dev/null 2>&1 &&
+    git -C "$repository_root" cat-file -e "$source_commit^{commit}" >/dev/null 2>&1 &&
+    git -C "$repository_root" diff --quiet "$source_commit" -- "${deployment_source_paths[@]}"; then
+    deployment_scope_dirty_evidence="false"
   fi
 fi
 

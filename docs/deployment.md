@@ -171,7 +171,11 @@ the `current.json` placeholder in a reviewed commit.
 
 During reconcile, supplied role/fee/mode values are comparison inputs only.
 They cannot overwrite recorded configuration; any mismatch changes the
-manifest to `evidence-conflict`.
+manifest to `evidence-conflict`. Reconciliation preserves an existing boolean
+`deploymentScopeDirty` value. It may promote a `null` value to `false` only
+when `current.json` is tracked and clean before extraction and the current
+deployment source paths match the recorded source commit; otherwise the value
+stays `null` or otherwise untrusted and RESUME/VERIFY remain fail-closed.
 
 Registry ownership acceptance is a privileged state transition. When the
 pending owner calls `AdapterRegistry.acceptOwnership`, the contract revokes
