@@ -2,7 +2,7 @@
 
 > **Pay with anything. Settle exactly.**
 
-사용자는 가진 자산으로 결제하고, 판매자는 선택한 자산과 정확한 금액으로
+사용자는 지원 자산으로 결제하고, 판매자는 선택한 자산과 정확한 금액으로
 정산받는 GIWA 기반 비수탁 결제 레이어입니다.
 
 GiwaPay is a testnet-only MVP implementation for non-custodial payment orchestration.
@@ -12,10 +12,51 @@ registry-owned merchant split, pays the fixed platform fee, and refunds unused
 input. The backend accepts success only after its independent,
 confirmation-aware indexer verifies the canonical router event.
 
+## Why GIWA
+
+GiwaPay is built for GIWA because the product and the ecosystem roadmaps point
+in the same direction:
+
+- **A practical EVM execution layer now.** GIWA documents an OP Stack-based,
+  EVM-compatible chain with one-second blocks and low fees, so the Solidity,
+  viem, and wallet boundaries in this repository work without inventing a
+  proprietary runtime.
+- **A credible payment surface next.** GIWA's official roadmap describes a
+  self-custody wallet and a stablecoin ecosystem that includes a stable
+  paymaster. GiwaPay supplies a merchant layer: signed payment
+  requests, exact settlement, registered recipients, and independently
+  verified receipts.
+- **GIWA-native trust primitives later.** Dojang attestations and Upbit Web3
+  Names create a documented path toward an address-level identity signal
+  without putting personal information into the PaymentIntent. Business and
+  merchant verification would remain a separate product and compliance step.
+
+These are product-fit reasons, not integration claims. GIWA mainnet and GIWA
+Wallet remain under development; the current MVP targets GIWA Sepolia, uses
+standard EIP-1193/EIP-6963 wallet interfaces, and does not connect to the Upbit
+exchange service. See the official [GIWA introduction](https://docs.giwa.io/),
+[Dojang](https://docs.giwa.io/giwa-chain/en/giwa-ecosystem/dojang),
+[up.id](https://docs.giwa.io/giwa-chain/en/giwa-ecosystem/giwa-id), and
+[testnet terms](https://docs.giwa.io/giwa-chain/en/terms-and-policies/testnet-terms-of-use).
+
 Public review links:
 
 - showcase: <https://giwapay-mvp.eomyunsig.chatgpt.site>
 - source: <https://github.com/eomyunsig-debug/giwapay>
+- GASOK application brief: [docs/gasok-application.md](docs/gasok-application.md)
+- GASOK technical one-pager:
+  [docs/gasok-one-pager.md](docs/gasok-one-pager.md)
+- GASOK pitch deck:
+  [docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf](docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf)
+- five-minute judge evidence path:
+  [docs/gasok-judge-evidence.md](docs/gasok-judge-evidence.md)
+- proposed wallet in-app mode:
+  [docs/giwa-wallet-embedded-mode.md](docs/giwa-wallet-embedded-mode.md)
+- two-minute demo script: [docs/submission-demo.md](docs/submission-demo.md)
+- market model and pilot plan:
+  [docs/market-opportunity.md](docs/market-opportunity.md)
+- portable market decision report:
+  [docs/market-report/report.html](docs/market-report/report.html)
 
 The public showcase is intentionally non-transactional. It does not imply that
 GIWA Sepolia contracts or the payment backend are live.
@@ -276,14 +317,17 @@ CONFIRM_GIWA_SEPOLIA_DEPLOY=91342 \
 GIWAPAY_DEPLOYER_ACCOUNT=my-encrypted-foundry-account \
 PLATFORM_FEE_RECIPIENT=0x… \
 ADAPTER_MANAGER_ADDRESS=0x… \
+PLATFORM_FEE_BPS=50 \
+PRODUCTION_MODE=true \
+DEPLOY_TEST_MOCKS=false \
 pnpm deploy:giwa-sepolia
 ```
 
-The wrapper checks the RPC-reported chain ID before broadcasting and never
-accepts a raw private-key command argument. It does not deploy to Ethereum or
-GIWA mainnet. Local and CI verification do not broadcast to GIWA Sepolia, and
-this repository does not claim that a public deployment has occurred. Review
-[deployment.md](docs/deployment.md) first.
+The wrapper checks the RPC-reported chain ID and reviewed genesis hash before
+broadcasting and never accepts a raw private-key command argument. It does not
+deploy to Ethereum or GIWA mainnet. Local and CI verification do not broadcast
+to GIWA Sepolia, and this repository does not claim that a public deployment
+has occurred. Review [deployment.md](docs/deployment.md) first.
 
 ## Security and scope
 
@@ -294,9 +338,12 @@ for future payment methods, production DEXes, on/off-ramps, wallet providers,
 paymasters, merchant verification, and x402. They are disabled boundaries—not
 fake integrations.
 
-Explicit non-goals include cards, Korean bank transfers, Upbit, fiat custody or
-off-ramp, a production KRW stablecoin, bridges, subscriptions, chargebacks,
-mainnet, and claims about unreleased GIWA Wallet or Stable Paymaster products.
+Current technical non-goals include cards, Korean bank transfers, Upbit
+account/exchange integration, fiat custody or off-ramp, a production KRW
+stablecoin, bridges, subscriptions, chargebacks, mainnet, and claims about
+unreleased GIWA Wallet or Stable Paymaster products. These boundaries keep the
+testnet MVP honest; they do not make GiwaPay chain-agnostic or weaken the
+GIWA-specific product thesis above.
 
 ## License
 

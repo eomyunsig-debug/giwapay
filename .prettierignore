@@ -7,6 +7,7 @@ next-env.d.ts
 AGENTS.md
 coverage
 dist
+docs/market-report/report.html
 node_modules
 out
 pnpm-lock.yaml

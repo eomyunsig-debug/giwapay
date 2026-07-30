@@ -1,0 +1,495 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "GiwaPay Market Opportunity and Pilot Decision",
+    "description": "An evidence-backed reference market, transparent scenario model, and four-week validation plan for the GIWA GASOK application.",
+    "generatedAt": "2026-07-30T06:24:13Z",
+    "cards": [
+      {
+        "id": "reference_market",
+        "description": "2025 Korean online overseas direct sales excluding duty-free; this is a broad reference market, not GiwaPay TAM.",
+        "dataset": "summary",
+        "sourceId": "kostat_2025_q4",
+        "metrics": [
+          {
+            "label": "2025 non-duty-free reference market",
+            "field": "reference_market_krw",
+            "format": "compact"
+          },
+          {
+            "label": "2025 total YoY",
+            "field": "total_yoy",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "base_case",
+        "description": "Illustrative processed volume when operationally eligible merchants represent 0.5% of reference sales value and GiwaPay processes 10% of that eligible checkout value; not a forecast or target.",
+        "dataset": "summary",
+        "sourceId": "giwapay_scenario_model",
+        "metrics": [
+          {
+            "label": "Base-case processed volume",
+            "field": "base_processed_volume_krw",
+            "format": "compact"
+          },
+          {
+            "label": "Illustrative 0.5% fee",
+            "field": "base_fee_krw",
+            "format": "compact"
+          }
+        ]
+      },
+      {
+        "id": "pilot_evidence",
+        "description": "Observed written pilot interests today. The validation gate is three; no merchant commitment is claimed.",
+        "dataset": "summary",
+        "sourceId": "giwapay_pilot_plan",
+        "metrics": [
+          {
+            "label": "Current written pilot interests",
+            "field": "current_pilot_interests",
+            "format": "number"
+          },
+          {
+            "label": "Validation gate",
+            "field": "pilot_interest_gate",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "eligibility_sensitivity",
+        "title": "Annual processed volume rises with eligible sales-volume share",
+        "subtitle": "Fixed at 10% GiwaPay share of eligible checkout value; every bar is a scenario, not observed demand",
+        "intent": "comparison",
+        "question": "How does processed volume change as the eligible share of reference sales value changes while GiwaPay's share of eligible checkout value stays fixed?",
+        "rationale": "A five-point sensitivity view isolates the largest unmeasured assumption and avoids presenting one base case as a forecast.",
+        "comparisonContext": {
+          "baseline": "KRW 1.9621T 2025 non-duty-free overseas direct-sales reference market",
+          "denominator": "2025 non-duty-free overseas direct sales",
+          "grain": "annual scenario",
+          "normalization": "fixed 10% GiwaPay share of eligible checkout value",
+          "semanticFamily": "processed payment volume",
+          "unit": "KRW"
+        },
+        "type": "bar",
+        "dataset": "eligibility_sensitivity",
+        "sourceId": "giwapay_scenario_model",
+        "encodings": {
+          "x": {
+            "field": "eligible_volume_share_label",
+            "type": "ordinal",
+            "label": "Eligible sales-volume share"
+          },
+          "y": {
+            "field": "processed_volume_krw",
+            "type": "quantitative",
+            "format": "compact",
+            "label": "Annual processed volume",
+            "unit": "KRW"
+          },
+          "tooltip": [
+            {
+              "field": "eligible_volume_share",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "Eligible sales-volume share"
+            },
+            {
+              "field": "giwapay_value_share",
+              "type": "quantitative",
+              "format": "percent",
+              "label": "GiwaPay share of eligible checkout value"
+            },
+            {
+              "field": "illustrative_fee_krw",
+              "type": "quantitative",
+              "format": "compact",
+              "label": "Illustrative 0.5% fee",
+              "unit": "KRW"
+            }
+          ]
+        },
+        "xAxisTitle": "Share of reference sales value from eligible merchants",
+        "yAxisTitle": "Annual processed volume (KRW)",
+        "valueFormat": "compact",
+        "unit": "KRW",
+        "layout": "full",
+        "maxRows": 5,
+        "emptyState": "No scenario rows are available."
+      }
+    ],
+    "tables": [
+      {
+        "id": "scenario_cases",
+        "title": "Low, base, and high scenario cases",
+        "subtitle": "Two independent assumptions are varied; amounts are illustrative and not committed GMV or revenue",
+        "dataset": "scenario_cases",
+        "defaultSort": {
+          "field": "processed_volume_krw",
+          "direction": "desc"
+        },
+        "density": "spacious",
+        "sourceId": "giwapay_scenario_model",
+        "layout": "full",
+        "columns": [
+          {
+            "field": "scenario",
+            "label": "Scenario",
+            "type": "text"
+          },
+          {
+            "field": "eligible_volume_share",
+            "label": "Eligible sales volume",
+            "format": "percent"
+          },
+          {
+            "field": "giwapay_value_share",
+            "label": "GiwaPay share of eligible value",
+            "format": "percent"
+          },
+          {
+            "field": "processed_volume_krw",
+            "label": "Processed volume (KRW)",
+            "format": "compact"
+          },
+          {
+            "field": "illustrative_fee_krw",
+            "label": "Illustrative fee (KRW)",
+            "format": "compact"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "kostat_2025_q4",
+        "label": "Korea Ministry of Data and Statistics — 2025 Q4 Online Shopping Trends",
+        "href": "https://mods.go.kr/boardDownload.es?bid=241&list_no=443337&seq=1",
+        "query": {
+          "engine": "SQLite",
+          "id": "KOSTAT-2025-Q4-ONLINE-SHOPPING",
+          "url": "https://mods.go.kr/boardDownload.es?bid=241&list_no=443337&seq=1",
+          "description": "2024 and 2025 online overseas direct-sales totals and duty-free components transcribed from the official Korea Ministry of Data and Statistics release.",
+          "executed_at": "2026-07-30T06:24:13Z",
+          "language": "sql",
+          "sql": "WITH official_totals(year, total_sales_krw, duty_free_sales_krw) AS (\n  SELECT 2024, 2597700000000, 949400000000\n  UNION ALL\n  SELECT 2025, 3023400000000, 1061300000000\n), wide AS (\n  SELECT\n    MAX(CASE WHEN year = 2024 THEN total_sales_krw END) AS total_sales_2024_krw,\n    MAX(CASE WHEN year = 2025 THEN total_sales_krw END) AS total_sales_2025_krw,\n    MAX(CASE WHEN year = 2025 THEN duty_free_sales_krw END) AS duty_free_sales_2025_krw\n  FROM official_totals\n)\nSELECT\n  total_sales_2024_krw,\n  total_sales_2025_krw,\n  total_sales_2025_krw - duty_free_sales_2025_krw AS reference_market_krw,\n  CAST(total_sales_2025_krw AS REAL) / total_sales_2024_krw - 1 AS total_yoy\nFROM wide;",
+          "filters": [
+            "Korean online overseas direct sales",
+            "Calendar years 2024 and 2025",
+            "Reference market excludes duty-free sales"
+          ],
+          "metric_definitions": [
+            "Non-duty-free reference market = total online overseas direct sales minus duty-free sales.",
+            "Total YoY growth = 2025 total divided by 2024 total minus one."
+          ]
+        }
+      },
+      {
+        "id": "giwapay_scenario_model",
+        "label": "GiwaPay scenario model",
+        "path": "docs/market-opportunity.md",
+        "query": {
+          "engine": "SQLite",
+          "id": "GIWAPAY-MARKET-SCENARIOS-2026-07-30",
+          "description": "Scenario calculations derived from the ministry's non-duty-free sales-volume baseline and explicit eligible-volume-share, GiwaPay-value-share, and illustrative-fee assumptions.",
+          "executed_at": "2026-07-30T06:24:13Z",
+          "language": "sql",
+          "sql": "WITH model(reference_market_krw, fee_rate) AS (\n  SELECT 1962100000000, 0.005\n), cases(row_type, scenario, eligible_volume_share, giwapay_value_share) AS (\n  VALUES\n    ('sensitivity', '0.10%', 0.001, 0.10),\n    ('sensitivity', '0.25%', 0.0025, 0.10),\n    ('sensitivity', '0.50%', 0.005, 0.10),\n    ('sensitivity', '0.75%', 0.0075, 0.10),\n    ('sensitivity', '1.00%', 0.01, 0.10),\n    ('scenario', 'Low', 0.001, 0.05),\n    ('scenario', 'Base', 0.005, 0.10),\n    ('scenario', 'High', 0.01, 0.20)\n)\nSELECT\n  row_type,\n  scenario,\n  eligible_volume_share,\n  giwapay_value_share,\n  CAST(reference_market_krw * eligible_volume_share * giwapay_value_share AS INTEGER) AS processed_volume_krw,\n  CAST(reference_market_krw * eligible_volume_share * giwapay_value_share * fee_rate AS INTEGER) AS illustrative_fee_krw,\n  reference_market_krw,\n  fee_rate\nFROM cases CROSS JOIN model;",
+          "filters": [
+            "Reference market = KRW 1.9621T",
+            "Sensitivity chart fixes GiwaPay share of eligible checkout value at 10%",
+            "Fee illustration fixes fee rate at 0.5%",
+            "No scenario is treated as a forecast or target"
+          ],
+          "metric_definitions": [
+            "Processed volume = non-duty-free overseas direct sales x eligible sales-volume share x GiwaPay share of eligible checkout value.",
+            "Illustrative fee = processed volume x 0.5%; pricing is not validated.",
+            "The merchant's signed settlement amount is not reduced by the platform fee."
+          ]
+        }
+      },
+      {
+        "id": "giwapay_pilot_plan",
+        "label": "GiwaPay four-week validation plan",
+        "path": "docs/market-opportunity.md",
+        "query": {
+          "engine": "SQLite",
+          "id": "GIWAPAY-PILOT-GATE-2026-07-30",
+          "description": "Proposed interview, written-interest, and testnet-integration gates. Current evidence counts are zero unless independently documented.",
+          "executed_at": "2026-07-30T06:24:13Z",
+          "language": "sql",
+          "sql": "SELECT\n  0 AS current_pilot_interests,\n  3 AS pilot_interest_gate,\n  0 AS current_testnet_integrations,\n  2 AS testnet_integration_gate;",
+          "filters": [
+            "Testnet-only validation",
+            "No real-fund commitment",
+            "No unreleased GIWA Wallet or exchange integration claim"
+          ],
+          "metric_definitions": [
+            "Written pilot interest = signed or email-confirmed willingness to evaluate one defined testnet checkout.",
+            "Validation gate = three written interests and two completed testnet integrations."
+          ]
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# GiwaPay Market Opportunity and Pilot Decision"
+      },
+      {
+        "id": "executive_summary",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Executive Summary\n\nThe Korea Ministry of Data and Statistics provides a concrete **KRW 1.9621T** 2025 non-duty-free cross-border online-sales-volume baseline, but it does not establish GiwaPay's addressable share or an eligible merchant count. The current base scenario produces **KRW 981.1M** of annual processed volume only after assuming that eligible merchants represent 0.5% of reference sales value and GiwaPay processes 10% of their eligible checkout value. Those assumptions are not yet measured. The recommendation is to treat the model as a decision aid and spend the next four weeks replacing eligibility and adoption assumptions with 15 merchant interviews, three written pilot interests, and two testnet integrations."
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "layout": "full",
+        "cardIds": ["reference_market", "base_case", "pilot_evidence"]
+      },
+      {
+        "id": "finding_reference_market",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "kostat_2025_q4",
+        "body": "## Finding 1 — the sales-volume baseline is observable, but product eligibility is not\n\nOnline overseas direct sales increased from **KRW 2.5977T in 2024 to KRW 3.0234T in 2025**, about **16.4% year over year**. Removing duty-free sales leaves **KRW 1.9621T** in non-duty-free online overseas direct sales. GiwaPay uses that last figure as the broadest observable sales-volume baseline—not as TAM, a merchant count, a sales pipeline, or a promise that any merchant can accept a GIWA-settled token."
+      },
+      {
+        "id": "sensitivity_chart",
+        "type": "chart",
+        "layout": "full",
+        "chartId": "eligibility_sensitivity"
+      },
+      {
+        "id": "finding_sensitivity",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "giwapay_scenario_model",
+        "body": "## Finding 2 — eligible sales volume is the highest-leverage unknown\n\nAt a fixed **10% GiwaPay share of eligible checkout value**, moving the eligible share of reference sales value from **0.1% to 1.0%** changes annual processed volume from **KRW 196.2M to KRW 1.9621B**. Every additional 0.25 percentage point of eligible sales-volume share adds about **KRW 490.5M** in this sensitivity model. The calculation is linear; the business uncertainty is how much sales value comes from merchants that can legally, operationally, and commercially use the settlement path."
+      },
+      {
+        "id": "scenario_table",
+        "type": "table",
+        "layout": "full",
+        "tableId": "scenario_cases"
+      },
+      {
+        "id": "go_to_market_evidence",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Go-to-market evidence plan\n\nStart with small Korean merchants that already sell cross-border and have wallet-aware customers: digital goods, creator products, software, memberships, or low-return-complexity D2C goods. Recruit through founder and seller communities plus existing professional contacts. Use the direct settlement-token path first and measure time to first PaymentIntent, checkout completion, canonical receipt rate, webhook latency, failure stage, and merchant reconciliation work. Do not lead with crypto sentiment; interview the current payment and settlement workflow."
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Next steps\n\n1. Complete 15 problem interviews and log evidence independently.\n2. Obtain three written, non-binding testnet pilot interests without claiming real-fund or unreleased-wallet commitments.\n3. Complete two merchant testnet integrations with at least 20 disposable payments each.\n4. Require canonical onchain receipt verification for every recorded success and classify every remaining failure by stage.\n5. Rebuild the scenario model from observed eligibility and checkout data before making any production asset, pricing, or revenue claim."
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Further questions\n\n- Which target merchants can legally and operationally hold the proposed settlement asset?\n- What share of their customers already has a compatible EVM wallet?\n- Which product cohort creates enough settlement or reconciliation pain to justify a new checkout?\n- What production asset and liquidity route can be supported without a DEX, fiat, or Upbit integration claim?\n- What observed checkout conversion and support load make a 0.5% fee acceptable?"
+      },
+      {
+        "id": "caveats",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Caveats and assumptions\n\n- The ministry figure is a macro sales-volume baseline, not GiwaPay TAM, an eligible merchant count, or serviceable obtainable market.\n- Eligible sales-volume share, GiwaPay share of eligible checkout value, and the 0.5% fee are assumptions; no scenario is a forecast, target, commitment, or valuation.\n- Current independently documented interviews, written pilot interests, and merchant testnet integrations are zero.\n- A production settlement asset, regulatory posture, DEX liquidity, routing cost, acquisition cost, support load, and willingness to pay remain unvalidated.\n- GIWA mainnet and GIWA Wallet are under development. This report does not claim an official wallet, exchange, fiat, or liquidity integration.\n- The report is a snapshot generated on 2026-07-30, not a live data connection."
+      },
+      {
+        "id": "source_notes",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## Sources\n\n- Korea Ministry of Data and Statistics, *2025 Q4 Online Shopping Trends*: official totals for 2024 and 2025 overseas direct sales and duty-free sales.\n- `docs/market-opportunity.md`: GiwaPay scenario assumptions, pilot gates, and outreach plan.\n\nThe chart dataset retains eligible sales-volume share, GiwaPay share of eligible checkout value, processed volume, fee illustration, and reference-market context so the sensitivity can be audited beyond the visible bars."
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-30T06:24:13Z",
+    "status": "ready",
+    "datasets": {
+      "summary": [
+        {
+          "reference_market_krw": 1962100000000,
+          "total_sales_2024_krw": 2597700000000,
+          "total_sales_2025_krw": 3023400000000,
+          "total_yoy": 0.16387573622820195,
+          "base_processed_volume_krw": 981050000,
+          "base_fee_krw": 4905250,
+          "current_pilot_interests": 0,
+          "pilot_interest_gate": 3,
+          "current_testnet_integrations": 0,
+          "testnet_integration_gate": 2
+        }
+      ],
+      "eligibility_sensitivity": [
+        {
+          "eligible_volume_share_label": "0.10%",
+          "eligible_volume_share": 0.001,
+          "giwapay_value_share": 0.1,
+          "processed_volume_krw": 196210000,
+          "illustrative_fee_krw": 981050,
+          "reference_market_krw": 1962100000000,
+          "model_status": "illustrative"
+        },
+        {
+          "eligible_volume_share_label": "0.25%",
+          "eligible_volume_share": 0.0025,
+          "giwapay_value_share": 0.1,
+          "processed_volume_krw": 490525000,
+          "illustrative_fee_krw": 2452625,
+          "reference_market_krw": 1962100000000,
+          "model_status": "illustrative"
+        },
+        {
+          "eligible_volume_share_label": "0.50%",
+          "eligible_volume_share": 0.005,
+          "giwapay_value_share": 0.1,
+          "processed_volume_krw": 981050000,
+          "illustrative_fee_krw": 4905250,
+          "reference_market_krw": 1962100000000,
+          "model_status": "illustrative"
+        },
+        {
+          "eligible_volume_share_label": "0.75%",
+          "eligible_volume_share": 0.0075,
+          "giwapay_value_share": 0.1,
+          "processed_volume_krw": 1471575000,
+          "illustrative_fee_krw": 7357875,
+          "reference_market_krw": 1962100000000,
+          "model_status": "illustrative"
+        },
+        {
+          "eligible_volume_share_label": "1.00%",
+          "eligible_volume_share": 0.01,
+          "giwapay_value_share": 0.1,
+          "processed_volume_krw": 1962100000,
+          "illustrative_fee_krw": 9810500,
+          "reference_market_krw": 1962100000000,
+          "model_status": "illustrative"
+        }
+      ],
+      "scenario_cases": [
+        {
+          "scenario": "Low",
+          "eligible_volume_share": 0.001,
+          "giwapay_value_share": 0.05,
+          "processed_volume_krw": 98105000,
+          "illustrative_fee_krw": 490525,
+          "reference_market_krw": 1962100000000,
+          "fee_rate": 0.005,
+          "model_status": "illustrative"
+        },
+        {
+          "scenario": "Base",
+          "eligible_volume_share": 0.005,
+          "giwapay_value_share": 0.1,
+          "processed_volume_krw": 981050000,
+          "illustrative_fee_krw": 4905250,
+          "reference_market_krw": 1962100000000,
+          "fee_rate": 0.005,
+          "model_status": "illustrative"
+        },
+        {
+          "scenario": "High",
+          "eligible_volume_share": 0.01,
+          "giwapay_value_share": 0.2,
+          "processed_volume_krw": 3924200000,
+          "illustrative_fee_krw": 19621000,
+          "reference_market_krw": 1962100000000,
+          "fee_rate": 0.005,
+          "model_status": "illustrative"
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "kostat_2025_q4",
+      "label": "Korea Ministry of Data and Statistics — 2025 Q4 Online Shopping Trends",
+      "href": "https://mods.go.kr/boardDownload.es?bid=241&list_no=443337&seq=1",
+      "query": {
+        "engine": "SQLite",
+        "id": "KOSTAT-2025-Q4-ONLINE-SHOPPING",
+        "url": "https://mods.go.kr/boardDownload.es?bid=241&list_no=443337&seq=1",
+        "description": "2024 and 2025 online overseas direct-sales totals and duty-free components transcribed from the official Korea Ministry of Data and Statistics release.",
+        "executed_at": "2026-07-30T06:24:13Z",
+        "language": "sql",
+        "sql": "WITH official_totals(year, total_sales_krw, duty_free_sales_krw) AS (\n  SELECT 2024, 2597700000000, 949400000000\n  UNION ALL\n  SELECT 2025, 3023400000000, 1061300000000\n), wide AS (\n  SELECT\n    MAX(CASE WHEN year = 2024 THEN total_sales_krw END) AS total_sales_2024_krw,\n    MAX(CASE WHEN year = 2025 THEN total_sales_krw END) AS total_sales_2025_krw,\n    MAX(CASE WHEN year = 2025 THEN duty_free_sales_krw END) AS duty_free_sales_2025_krw\n  FROM official_totals\n)\nSELECT\n  total_sales_2024_krw,\n  total_sales_2025_krw,\n  total_sales_2025_krw - duty_free_sales_2025_krw AS reference_market_krw,\n  CAST(total_sales_2025_krw AS REAL) / total_sales_2024_krw - 1 AS total_yoy\nFROM wide;",
+        "filters": [
+          "Korean online overseas direct sales",
+          "Calendar years 2024 and 2025",
+          "Reference market excludes duty-free sales"
+        ],
+        "metric_definitions": [
+          "Non-duty-free reference market = total online overseas direct sales minus duty-free sales.",
+          "Total YoY growth = 2025 total divided by 2024 total minus one."
+        ]
+      }
+    },
+    {
+      "id": "giwapay_scenario_model",
+      "label": "GiwaPay scenario model",
+      "path": "docs/market-opportunity.md",
+      "query": {
+        "engine": "SQLite",
+        "id": "GIWAPAY-MARKET-SCENARIOS-2026-07-30",
+        "description": "Scenario calculations derived from the ministry's non-duty-free sales-volume baseline and explicit eligible-volume-share, GiwaPay-value-share, and illustrative-fee assumptions.",
+        "executed_at": "2026-07-30T06:24:13Z",
+        "language": "sql",
+        "sql": "WITH model(reference_market_krw, fee_rate) AS (\n  SELECT 1962100000000, 0.005\n), cases(row_type, scenario, eligible_volume_share, giwapay_value_share) AS (\n  VALUES\n    ('sensitivity', '0.10%', 0.001, 0.10),\n    ('sensitivity', '0.25%', 0.0025, 0.10),\n    ('sensitivity', '0.50%', 0.005, 0.10),\n    ('sensitivity', '0.75%', 0.0075, 0.10),\n    ('sensitivity', '1.00%', 0.01, 0.10),\n    ('scenario', 'Low', 0.001, 0.05),\n    ('scenario', 'Base', 0.005, 0.10),\n    ('scenario', 'High', 0.01, 0.20)\n)\nSELECT\n  row_type,\n  scenario,\n  eligible_volume_share,\n  giwapay_value_share,\n  CAST(reference_market_krw * eligible_volume_share * giwapay_value_share AS INTEGER) AS processed_volume_krw,\n  CAST(reference_market_krw * eligible_volume_share * giwapay_value_share * fee_rate AS INTEGER) AS illustrative_fee_krw,\n  reference_market_krw,\n  fee_rate\nFROM cases CROSS JOIN model;",
+        "filters": [
+          "Reference market = KRW 1.9621T",
+          "Sensitivity chart fixes GiwaPay share of eligible checkout value at 10%",
+          "Fee illustration fixes fee rate at 0.5%",
+          "No scenario is treated as a forecast or target"
+        ],
+        "metric_definitions": [
+          "Processed volume = non-duty-free overseas direct sales x eligible sales-volume share x GiwaPay share of eligible checkout value.",
+          "Illustrative fee = processed volume x 0.5%; pricing is not validated.",
+          "The merchant's signed settlement amount is not reduced by the platform fee."
+        ]
+      }
+    },
+    {
+      "id": "giwapay_pilot_plan",
+      "label": "GiwaPay four-week validation plan",
+      "path": "docs/market-opportunity.md",
+      "query": {
+        "engine": "SQLite",
+        "id": "GIWAPAY-PILOT-GATE-2026-07-30",
+        "description": "Proposed interview, written-interest, and testnet-integration gates. Current evidence counts are zero unless independently documented.",
+        "executed_at": "2026-07-30T06:24:13Z",
+        "language": "sql",
+        "sql": "SELECT\n  0 AS current_pilot_interests,\n  3 AS pilot_interest_gate,\n  0 AS current_testnet_integrations,\n  2 AS testnet_integration_gate;",
+        "filters": [
+          "Testnet-only validation",
+          "No real-fund commitment",
+          "No unreleased GIWA Wallet or exchange integration claim"
+        ],
+        "metric_definitions": [
+          "Written pilot interest = signed or email-confirmed willingness to evaluate one defined testnet checkout.",
+          "Validation gate = three written interests and two completed testnet integrations."
+        ]
+      }
+    }
+  ],
+  "package_info": {
+    "root": ".",
+    "manifestPath": "docs/market-report/artifact.json",
+    "snapshotPath": "docs/market-report/artifact.json"
+  }
+}

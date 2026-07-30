@@ -4,7 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'GiwaPay — Pay with anything. Settle exactly.',
   description:
-    'GIWA 기반 비수탁 exact-settlement 결제 오케스트레이션 레이어의 공개 Testnet MVP showcase.',
+    'GIWA 기반 비수탁 exact-settlement 결제 레이어의 제품 적합성, 검증 가능한 Testnet MVP와 명확한 구현 경계.',
   metadataBase: new URL('https://giwapay-mvp.eomyunsig.chatgpt.site'),
   alternates: {
     canonical: '/',
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'GiwaPay — Pay with anything. Settle exactly.',
     description:
-      "A public, non-transactional showcase of GiwaPay's testnet MVP and security boundaries.",
+      "GiwaPay's GIWA fit, exact-settlement testnet MVP, verification evidence, and honest product boundaries.",
     type: 'website',
     images: [
       {
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'GiwaPay — Pay with anything. Settle exactly.',
-    description: 'Public GIWA Sepolia testnet MVP showcase.',
+    description: 'GIWA fit and public GIWA Sepolia testnet MVP showcase.',
     images: ['/og.png'],
   },
   icons: {
