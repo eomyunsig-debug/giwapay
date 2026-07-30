@@ -21,6 +21,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--montage-output", type=Path)
     args = parser.parse_args()
 
     slide_paths = sorted(
@@ -42,6 +43,28 @@ def main() -> None:
             resolution=120.0,
             quality=95,
         )
+        if args.montage_output is not None:
+            columns = 2
+            thumb_width = 640
+            thumb_height = 360
+            rows = (len(images) + columns - 1) // columns
+            montage = Image.new(
+                "RGB",
+                (columns * thumb_width, rows * thumb_height),
+                "#E5E7E5",
+            )
+            for index, image in enumerate(images):
+                thumbnail = image.resize(
+                    (thumb_width, thumb_height),
+                    Image.Resampling.LANCZOS,
+                )
+                montage.paste(
+                    thumbnail,
+                    ((index % columns) * thumb_width, (index // columns) * thumb_height),
+                )
+            args.montage_output.parent.mkdir(parents=True, exist_ok=True)
+            montage.save(args.montage_output, "WEBP", quality=92, method=6)
+            montage.close()
     finally:
         for image in images:
             image.close()

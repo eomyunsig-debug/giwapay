@@ -163,7 +163,7 @@ async function build() {
     addText(
       slide,
       'cover-title',
-      '고객은 가진 자산으로,\n판매자는 정확한 금액으로.',
+      '고객은 지원 자산으로,\n판매자는 정확한 금액으로.',
       M,
       230,
       540,
@@ -204,7 +204,7 @@ async function build() {
       540,
       34,
       {
-        fontSize: 14,
+        fontSize: 16,
         color: C.muted,
         lineSpacing: 1,
       },
@@ -249,7 +249,7 @@ async function build() {
     addText(
       slide,
       'problem-left-message',
-      '고객이 가진 자산\n≠\n판매자가 받을 자산',
+      '고객이 보유한 지원 자산\n≠\n판매자가 받을 자산',
       M,
       260,
       500,
@@ -479,11 +479,13 @@ async function build() {
       slide,
       'Flashblocks는 제출 체감을 개선할 수 있지만 정산 finality로 사용하지 않습니다. GIWA Wallet은 공식 인터페이스가 공개되기 전까지 제안 경계이며, Dojang과 up.id도 결제 실행과 분리합니다.',
       [
-        'https://docs.giwa.io/get-started/connect-to-giwa',
-        'https://docs.giwa.io/network-information/transaction-fees',
-        'https://docs.giwa.io/giwa-ecosystem/dojang',
-        'https://docs.giwa.io/giwa-ecosystem/up-id',
-        'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/giwa-wallet-embedded-mode.md',
+        'https://docs.giwa.io/giwa-chain/en',
+        'https://docs.giwa.io/giwa-chain/en/get-started/connect-to-giwa',
+        'https://docs.giwa.io/giwa-chain/en/network-information/transaction-fees',
+        'https://docs.giwa.io/giwa-chain/en/giwa-ecosystem/dojang',
+        'https://docs.giwa.io/giwa-chain/en/giwa-ecosystem/giwa-id',
+        'https://docs.giwa.io/giwa-chain/en/terms-and-policies/testnet-terms-of-use',
+        'https://github.com/eomyunsig-debug/giwapay/blob/agent/giwa-program-submission/docs/giwa-wallet-embedded-mode.md',
       ],
     );
   }
@@ -512,7 +514,11 @@ async function build() {
         'Truth layer',
         'confirmation-aware indexer · reorg rollback · verified split snapshot',
       ],
-      ['04', 'Product & QA', 'checkout · dashboard · SDK · webhooks · local Anvil · CI'],
+      [
+        '04',
+        'Product & QA',
+        'checkout · dashboard · SDK · 4 green CI jobs · 44 Foundry total (5 invariant)',
+      ],
     ];
     implemented.forEach((item, index) => {
       const top = 258 + index * 76;
@@ -575,7 +581,7 @@ async function build() {
       366,
       44,
       {
-        fontSize: 15,
+        fontSize: 16,
         color: C.panelStrong,
         lineSpacing: 1,
       },
@@ -588,19 +594,20 @@ async function build() {
         'https://github.com/eomyunsig-debug/giwapay',
         'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/testing.md',
         'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/deployment.md',
+        'https://github.com/eomyunsig-debug/giwapay/actions/runs/30518612814',
         'https://sepolia-explorer.giwa.io',
       ],
     );
   }
 
-  // 06 — Market validation targets (Codex Grid slide 19 metrics)
+  // 06 — Market scenario range (Codex Grid slide 19 metrics)
   {
     const slide = newSlide(presentation);
     addSlideTitle(
       slide,
       6,
-      '시장성은 큰 TAM이 아니라 8주 관찰값으로 줄입니다',
-      '참고 시장과 현재 증거, Phase 3 목표를 같은 숫자로 섞지 않습니다.',
+      '시장 가정은 범위로, 공개 확인 실적은 별도로 표시합니다',
+      '참고 시장, 가정 기반 처리액, 현재 증거를 같은 숫자로 섞지 않습니다.',
     );
     addText(
       slide,
@@ -617,9 +624,9 @@ async function build() {
       },
     );
     const metrics = [
-      ['15', '판매자 문제 인터뷰', '적합 merchant 비중과 정산 pain 확인'],
-      ['3', '서면 파일럿 관심', '실제 도입 의향을 문서로 검증'],
-      ['2', '테스트넷 통합', '직접토큰 경로로 운영 가능성 측정'],
+      ['0.981억', 'LOW · 연간 처리액', '0.5% 예시 수수료 49만원\n적격 0.1% × checkout 5%'],
+      ['9.811억', 'BASE · 연간 처리액', '0.5% 예시 수수료 491만원\n적격 0.5% × checkout 10%'],
+      ['39.24억', 'HIGH · 연간 처리액', '0.5% 예시 수수료 1,962만원\n적격 1.0% × checkout 20%'],
     ];
     metrics.forEach((metric, index) => {
       const left = 48 + index * 410;
@@ -633,7 +640,7 @@ async function build() {
         index === 1 ? C.accentPale : C.panel,
       );
       addText(slide, `market-stat-${index}`, metric[0], left + 24, 334, 316, 90, {
-        fontSize: 68,
+        fontSize: 52,
         bold: true,
         color: index === 1 ? C.accentDark : C.ink,
         typeface: FONT_EN,
@@ -653,7 +660,7 @@ async function build() {
     addText(
       slide,
       'market-zero',
-      '현재 실적: 인터뷰 0 · 서면 관심 0 · merchant 통합 0  /  위 숫자는 Phase 3 목표입니다.',
+      '공개 확인 실적: 인터뷰 0 · 서면 관심 0 · merchant 통합 0  /  비공개·오프라인 활동은 신청자 확인 필요',
       M,
       590,
       1184,
@@ -668,10 +675,10 @@ async function build() {
     addFooter(slide, 6);
     addNotes(
       slide,
-      '1.9621조원은 거시 참고 기준이며 GiwaPay TAM으로 사용하지 않습니다. 평가자가 보는 세 숫자는 현재 traction이 아니라 Phase 3에서 관찰할 목표입니다.',
+      '1.9621조원은 거시 참고 기준이며 GiwaPay TAM으로 사용하지 않습니다. Low/Base/High는 각각 98,105,000원, 981,050,000원, 3,924,200,000원의 가정 기반 연간 처리액입니다. 0.5% 예시 수수료는 490,525원, 4,905,250원, 19,621,000원입니다. 저장소와 공개 자료에서 검증된 인터뷰·서면 관심·merchant 통합은 모두 0이며, 비공개·오프라인 활동은 신청자가 확인해야 합니다.',
       [
         'https://mods.go.kr/boardDownload.es?bid=241&list_no=443337&seq=1',
-        'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/market-opportunity.md',
+        'https://github.com/eomyunsig-debug/giwapay/blob/agent/giwa-program-submission/docs/market-opportunity.md',
       ],
     );
   }
@@ -774,7 +781,7 @@ async function build() {
       932,
       22,
       {
-        fontSize: 14,
+        fontSize: 16,
         color: C.muted,
         lineSpacing: 1,
       },
@@ -784,8 +791,8 @@ async function build() {
       slide,
       '순서를 바꾸지 않습니다. 제출 전에는 검증 계약, Phase 3 초반에는 수요와 Wallet 경계, 후반에는 실제 테스트넷 운영과 외부 계약 리뷰를 진행합니다.',
       [
-        'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/market-opportunity.md',
-        'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/giwa-wallet-embedded-mode.md',
+        'https://github.com/eomyunsig-debug/giwapay/blob/agent/giwa-program-submission/docs/market-opportunity.md',
+        'https://github.com/eomyunsig-debug/giwapay/blob/agent/giwa-program-submission/docs/giwa-wallet-embedded-mode.md',
         'https://github.com/eomyunsig-debug/giwapay/blob/main/docs/testing.md',
       ],
     );
@@ -823,12 +830,21 @@ async function build() {
       typeface: FONT_EN,
       lineSpacing: 1,
     });
-    addText(slide, 'close-team', 'Founder-led · product & engineering', 146, 504, 410, 28, {
-      fontSize: 21,
-      bold: true,
-      typeface: FONT_EN,
-      lineSpacing: 1,
-    });
+    addText(
+      slide,
+      'close-team',
+      'Product & engineering · public profile pending',
+      146,
+      504,
+      520,
+      28,
+      {
+        fontSize: 21,
+        bold: true,
+        typeface: FONT_EN,
+        lineSpacing: 1,
+      },
+    );
     addText(slide, 'close-ask-label', 'GASOK ASK', M, 556, 108, 24, {
       fontSize: 16,
       bold: true,
@@ -852,7 +868,7 @@ async function build() {
     );
     addRect(slide, 'close-status-bg', 1010, 522, 222, 76, C.ink);
     addText(slide, 'close-status-label', 'VERIFIED CONTRACT', 1028, 540, 188, 20, {
-      fontSize: 13,
+      fontSize: 16,
       bold: true,
       color: C.accent,
       typeface: FONT_EN,
@@ -876,7 +892,7 @@ async function build() {
       900,
       22,
       {
-        fontSize: 15,
+        fontSize: 16,
         color: C.muted,
         typeface: FONT_EN,
         lineSpacing: 1,
@@ -907,16 +923,6 @@ async function build() {
     );
   }
 
-  const montage = await presentation.export({
-    format: 'webp',
-    montage: true,
-    scale: 1,
-  });
-  await fs.writeFile(
-    path.join(TMP_DIR, 'artifact-render', 'deck-montage.webp'),
-    new Uint8Array(await montage.arrayBuffer()),
-  );
-
   const snapshot = await presentation.inspect({
     kind: 'slide,textbox,shape,image,notes',
     maxChars: 50000,
@@ -930,7 +936,15 @@ async function build() {
 
   const pdfResult = spawnSync(
     process.env.GIWAPAY_DECK_PYTHON ?? 'python3',
-    [PDF_ASSEMBLER, '--input-dir', path.join(TMP_DIR, 'artifact-render'), '--output', FINAL_PDF],
+    [
+      PDF_ASSEMBLER,
+      '--input-dir',
+      path.join(TMP_DIR, 'artifact-render'),
+      '--output',
+      FINAL_PDF,
+      '--montage-output',
+      path.join(TMP_DIR, 'artifact-render', 'deck-montage.webp'),
+    ],
     { stdio: 'inherit' },
   );
   if (pdfResult.status !== 0) {

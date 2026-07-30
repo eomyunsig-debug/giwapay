@@ -1,0 +1,45 @@
+{
+  "transactions": [
+    {
+      "transactionType": "CREATE",
+      "contractName": "MerchantRegistry",
+      "contractAddress": "0x1111111111111111111111111111111111111111"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "AdapterRegistry",
+      "contractAddress": "0x2222222222222222222222222222222222222222"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "PaymentRouter",
+      "contractAddress": "0x3333333333333333333333333333333333333333"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "MockKRW",
+      "contractAddress": "0x4444444444444444444444444444444444444444"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "MockUSDC",
+      "contractAddress": "0x5555555555555555555555555555555555555555"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "MockALT",
+      "contractAddress": "0x6666666666666666666666666666666666666666"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "MockTokenFaucet",
+      "contractAddress": "0x7777777777777777777777777777777777777777"
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "MockFixedRateExactOutputAdapter",
+      "contractAddress": "0x8888888888888888888888888888888888888888"
+    }
+  ],
+  "receipts": []
+}

@@ -1,0 +1,73 @@
+{
+  "chain": 91342,
+  "commit": "1234567",
+  "transactions": [
+    {
+      "transactionType": "CREATE",
+      "contractName": "MerchantRegistry",
+      "contractAddress": "0x1111111111111111111111111111111111111111",
+      "hash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "arguments": []
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "AdapterRegistry",
+      "contractAddress": "0x2222222222222222222222222222222222222222",
+      "hash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "arguments": [
+        "0x4444444444444444444444444444444444444444",
+        "0x5555555555555555555555555555555555555555",
+        "true"
+      ]
+    },
+    {
+      "transactionType": "CREATE",
+      "contractName": "PaymentRouter",
+      "contractAddress": "0x3333333333333333333333333333333333333333",
+      "hash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "arguments": [
+        "0x4444444444444444444444444444444444444444",
+        "0x1111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222",
+        "0x6666666666666666666666666666666666666666",
+        "50"
+      ]
+    },
+    {
+      "transactionType": "CALL",
+      "contractName": "IgnoredCall",
+      "hash": "0x9999999999999999999999999999999999999999999999999999999999999999"
+    }
+  ],
+  "receipts": [
+    {
+      "contractAddress": "0x1111111111111111111111111111111111111111",
+      "transactionHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "blockHash": "0x1010101010101010101010101010101010101010101010101010101010101010",
+      "blockNumber": "0x64",
+      "status": "0x1"
+    },
+    {
+      "contractAddress": "0x2222222222222222222222222222222222222222",
+      "transactionHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "blockHash": "0x2020202020202020202020202020202020202020202020202020202020202020",
+      "blockNumber": "0x65",
+      "status": "0x1"
+    },
+    {
+      "contractAddress": "0x3333333333333333333333333333333333333333",
+      "transactionHash": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "blockHash": "0x3030303030303030303030303030303030303030303030303030303030303030",
+      "blockNumber": "0x66",
+      "status": "0x1"
+    },
+    {
+      "contractAddress": null,
+      "transactionHash": "0x9999999999999999999999999999999999999999999999999999999999999999",
+      "blockHash": "0x4040404040404040404040404040404040404040404040404040404040404040",
+      "blockNumber": "0x67",
+      "status": "0x1"
+    }
+  ],
+  "pending": []
+}

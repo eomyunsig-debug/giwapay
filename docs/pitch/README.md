@@ -11,6 +11,12 @@ GIWA Explorer source verification, and public deployment manifest are real.
 Do not place a private key, keystore, access token, or unreviewed address in
 the deck.
 
+The PDF is assembled from the deck's reviewed slide renders so Korean
+typography stays consistent across reviewer environments. Keep the PPTX as the
+editable, source-linked version. The current eight-slide build has source notes
+on every slide and passed the presentation overflow check; inspect the
+all-slide montage after every rebuild.
+
 ## Rebuild
 
 Initialize this directory with the bundled Presentation skill workspace helper

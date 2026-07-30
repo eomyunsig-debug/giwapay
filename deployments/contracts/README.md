@@ -2,6 +2,9 @@
 
 Foundry broadcast artifacts are generated under `packages/contracts/broadcast/`
 and intentionally ignored because they contain environment-specific data.
+The reviewed, sanitized GIWA Sepolia summary is written separately to
+`deployments/giwa-sepolia/current.json`. That one exact JSON path is trackable;
+all other generated network JSON remains ignored.
 
 After an intentional deployment, record a reviewed manifest in the matching
 network directory with:
@@ -18,8 +21,9 @@ network directory with:
 - whether `productionMode` was enabled;
 - explorer verification links.
 
-Never add a private key, keystore content, RPC credential, secret environment
-value, or wallet recovery material to a manifest.
+Never add a private key, keystore account name or content, RPC credential,
+secret environment value, absolute operator path, or wallet recovery material
+to a public manifest.
 
 Local manifests are disposable test evidence. GIWA Sepolia manifests are
 testnet records and must not be described as mainnet or audited deployments.

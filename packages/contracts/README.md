@@ -251,32 +251,35 @@ always test-labelled.
 
 ## Opt-in GIWA Sepolia deployment
 
-`DeployGiwaSepolia` hard-fails unless `block.chainid == 91342`. It defaults to a
-production-mode adapter registry and does not deploy mocks. The RPC remains
-configurable; the official public endpoint may be rate-limited.
+`DeployGiwaSepolia` hard-fails unless `block.chainid == 91342`. Public use must
+go through the repository wrapper, which also checks the reviewed genesis hash,
+clean source scope, prior broadcast evidence, immutable configuration, and
+deployer balance. The official public RPC may be rate-limited.
 
-Use only an already-configured Foundry keystore account, and review every
-environment value before adding the explicit `--broadcast` flag:
+Use only an already-configured encrypted Foundry keystore account and invoke
+the wrapper from the repository root:
 
 ```sh
-export GIWA_RPC_URL=https://sepolia-rpc.giwa.io
-export DEPLOYER_ADDRESS=0x...
-export PLATFORM_FEE_RECIPIENT=0x...
-export ADAPTER_MANAGER_ADDRESS=0x...
-export PLATFORM_FEE_BPS=50
-export PRODUCTION_MODE=true
-
-forge script script/DeployGiwaSepolia.s.sol:DeployGiwaSepolia \
-  --rpc-url "$GIWA_RPC_URL" \
-  --account "$FOUNDRY_ACCOUNT" \
-  --sender "$DEPLOYER_ADDRESS" \
-  --broadcast
+CONFIRM_GIWA_SEPOLIA_DEPLOY=91342 \
+GIWAPAY_DEPLOYER_ACCOUNT=my-encrypted-foundry-account \
+PLATFORM_FEE_RECIPIENT=0x… \
+ADAPTER_MANAGER_ADDRESS=0x… \
+PLATFORM_FEE_BPS=50 \
+PRODUCTION_MODE=true \
+DEPLOY_TEST_MOCKS=false \
+pnpm deploy:giwa-sepolia
 ```
 
-The script never deploys to GIWA or Ethereum mainnet and never reads a raw
-private key. To deploy demo mocks on GIWA Sepolia, explicitly set
-`PRODUCTION_MODE=false` and `DEPLOY_TEST_MOCKS=true`; those addresses must
-remain labelled testnet demo throughout the UI and API.
+Do not call `forge script ... --broadcast` directly for public GIWA Sepolia.
+The wrapper preserves partial evidence and prevents blind duplicate reruns. It
+never deploys to GIWA or Ethereum mainnet and never reads a raw private key.
+See [`docs/deployment.md`](../../docs/deployment.md) for reconcile, exact resume,
+and non-signing source-verification procedures.
+
+Labelled demo mocks require `PRODUCTION_MODE=false` and
+`DEPLOY_TEST_MOCKS=true`. Mock deployments are never marked automatically ready
+because their route, cap, faucet, role, and liquidity state requires additional
+on-chain proof.
 
 ## Test coverage
 

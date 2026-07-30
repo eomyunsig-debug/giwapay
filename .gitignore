@@ -22,3 +22,4 @@ deployments/local/*.json
 deployments/giwa-sepolia/*.json
 !deployments/local/.gitkeep
 !deployments/giwa-sepolia/.gitkeep
+!deployments/giwa-sepolia/current.json

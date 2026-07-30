@@ -34,7 +34,7 @@ GiwaPay never holds a merchant or customer balance.
 Merchant dashboard
   -> PaymentIntent API and non-exportable merchant signer
   -> Customer checkout and explicit wallet actions
-  -> PaymentRouter on GIWA
+  -> PaymentRouter for GIWA Sepolia (public deployment pending)
        -> direct settlement-token path
        -> allowlisted exact-output adapter, when production liquidity exists
        -> registered split recipients

@@ -7,7 +7,7 @@ public**
 
 - Team name: **GiwaPay**
 - Applicant: **`[full name]`**
-- Role: **Founder / product and engineering**
+- Role: **`[applicant-approved role]`**
 - Nationality: **`[nationality]`**
 - Contact: **`[public contact email]`**
 - GASOK availability through October 2026: **`[availability]`**

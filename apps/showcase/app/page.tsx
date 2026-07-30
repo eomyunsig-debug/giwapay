@@ -10,10 +10,13 @@ export const metadata: Metadata = {
 };
 
 const github = 'https://github.com/eomyunsig-debug/giwapay';
-const gasokBrief = `${github}/blob/main/docs/gasok-application.md`;
-const technicalOnePager = `${github}/blob/main/docs/gasok-one-pager.md`;
-const walletProposal = `${github}/blob/main/docs/giwa-wallet-embedded-mode.md`;
-const marketPlan = `${github}/blob/main/docs/market-opportunity.md`;
+const submissionTree = `${github}/blob/main`;
+const gasokBrief = `${submissionTree}/docs/gasok-application.md`;
+const technicalOnePager = `${submissionTree}/docs/gasok-one-pager.md`;
+const pitchDeck = `${submissionTree}/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf`;
+const judgeEvidence = `${submissionTree}/docs/gasok-judge-evidence.md`;
+const walletProposal = `${submissionTree}/docs/giwa-wallet-embedded-mode.md`;
+const marketPlan = `${submissionTree}/docs/market-opportunity.md`;
 const giwaIntroduction = 'https://docs.giwa.io/';
 const giwaDojang = 'https://docs.giwa.io/giwa-chain/en/giwa-ecosystem/dojang';
 const giwaId = 'https://docs.giwa.io/giwa-chain/en/giwa-ecosystem/giwa-id';
@@ -437,6 +440,12 @@ export default function Home() {
                 </a>
                 <a href={technicalOnePager} target="_blank" rel="noreferrer">
                   <Bilingual en="Technical one-pager" ko="기술 원페이저" />
+                </a>
+                <a href={pitchDeck} target="_blank" rel="noreferrer">
+                  <Bilingual en="GASOK pitch deck" ko="GASOK 피치덱" />
+                </a>
+                <a href={judgeEvidence} target="_blank" rel="noreferrer">
+                  <Bilingual en="Judge evidence path" ko="심사 증거 경로" />
                 </a>
                 <a href={walletProposal} target="_blank" rel="noreferrer">
                   <Bilingual en="Wallet in-app proposal" ko="월렛 인앱 제안" />

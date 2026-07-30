@@ -74,6 +74,11 @@ test('explains GIWA fit without claiming unreleased or exchange integrations', a
   assert.match(html, /giwa-wallet-embedded-mode\.md/);
   assert.match(html, /gasok-one-pager\.md/);
   assert.match(html, /market-opportunity\.md/);
+  assert.match(html, /GiwaPay-GASOK-Pitch-Deck\.pdf/);
+  assert.match(html, /gasok-judge-evidence\.md/);
+  assert.match(html, /blob\/main\/docs\/gasok-application\.md/);
+  assert.match(html, /blob\/main\/docs\/gasok-one-pager\.md/);
+  assert.match(html, /blob\/main\/docs\/gasok-judge-evidence\.md/);
   assert.doesNotMatch(html, /GIWA Wallet integration complete/i);
   assert.doesNotMatch(html, /Upbit liquidity/i);
 });

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 2,
+  "project": "GiwaPay",
+  "chainId": 91342,
+  "mode": "giwa-sepolia",
+  "deploymentStatus": "not-deployed",
+  "sourceCommit": null,
+  "deploymentScopeDirty": null,
+  "fullTreeDirty": null,
+  "contracts": {},
+  "contractEvidence": {},
+  "configurationConflicts": [],
+  "mockReadiness": {
+    "status": "unknown",
+    "reason": "No reviewed public deployment has established mock mode."
+  },
+  "verification": {
+    "requested": false,
+    "status": "not-requested",
+    "contracts": {}
+  },
+  "notes": ["No reviewed public GIWA Sepolia deployment has been recorded."]
+}

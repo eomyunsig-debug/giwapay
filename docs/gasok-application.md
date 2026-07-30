@@ -1,9 +1,9 @@
 # GiwaPay GASOK application brief
 
-Status: **submission-content draft; the field map below is a provisional
-transcription that must be checked against the live form. Applicant details, a
-public pitch-deck link, a verified GIWA Sepolia contract, video, consent
-decisions, and a submission receipt are still pending.**
+Status: **submission-content draft. The dynamic form map could not be
+independently verified and must be checked in the live form. Applicant details,
+a verified GIWA Sepolia contract, executable-flow demo, consent decisions,
+final source/CI links, and a submission receipt are still pending.**
 
 The official GASOK page lists **2026-07-31** as the additional-application
 deadline. An
@@ -17,60 +17,65 @@ MVP.
 Sources:
 
 - Official program page: <https://giwa.io/gasok>
-- Upbit program notice reproduced by AiCoin, including the `23:59:59` cutoff:
-  <https://www.aicoin.com/en/news-flash/2982767>
+- Official Upbit program notice, including the `23:59:59` cutoff:
+  <https://upbit.com/service_center/notice?id=6386>
 
 ## Links to submit
 
 - Product: **GiwaPay**
 - Official application form: <https://ds.fdback.me/r/bLHPv694o6Au3>
-- Public showcase: <https://giwapay-mvp.eomyunsig.chatgpt.site>
+- Public showcase, supplemental and non-transactional:
+  <https://giwapay-mvp.eomyunsig.chatgpt.site>
 - Source: <https://github.com/eomyunsig-debug/giwapay>
+- Public pitch deck:
+  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf>
+- Public technical one-pager:
+  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/gasok-one-pager.md>
+- Judge evidence path:
+  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/gasok-judge-evidence.md>
 - Hardening-merge CI baseline on `main`:
   <https://github.com/eomyunsig-debug/giwapay/actions/runs/30518612814>
 - Current `main` CI history:
   <https://github.com/eomyunsig-debug/giwapay/actions/workflows/ci.yml?query=branch%3Amain>
-- Wallet in-app proposal:
-  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/giwa-wallet-embedded-mode.md>
-- Two-minute demo plan:
-  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/submission-demo.md>
-- Market model and pilot plan:
-  <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/market-opportunity.md>
+- Wallet in-app proposal: [giwa-wallet-embedded-mode.md](giwa-wallet-embedded-mode.md)
+- Two-minute demo plan: [submission-demo.md](submission-demo.md)
+- Market model and pilot plan: [market-opportunity.md](market-opportunity.md)
 - GIWA Sepolia verified contract: **`[required before submission]`**
-- Public pitch deck: **`[required before submission]`**
 - Public team introduction: **`[required before submission]`**
 - Submission receipt: **`[record after submission]`**
 
-Replace repository links that still point to a feature branch only after the
-branch is merged into `main`.
+Replace the pitch-deck and one-pager `main` links above with their public
+immutable artifact-commit links after the final artifacts are committed. Record
+the final reviewed deployment source commit and its successful CI run before
+submission.
 
-## Provisional form map
+## Provisional form map — verify in the live form
 
-The working transcription records 12 substantive questions plus two consent
-items. This review could load only the public form shell, not the interactive
-fields, so question order, required/optional status, character limits, link
-requirements, consent language, and disqualification language remain
-**unverified**. Check every row against the live form before copying an answer.
+The dynamic application form could not be independently inspected during this
+review. The rows below are a drafting aid transcribed from earlier working
+notes, **not a confirmed statement of the current questions, required/optional
+status, limits, consent wording, or track-selection mechanics**. Check the live
+form before copying any answer and follow its current labels and limits.
 
-|   # | Form field                                | Submission value                                                            |
-| --: | ----------------------------------------- | --------------------------------------------------------------------------- |
-|   1 | Team name, 1–50 characters                | `GiwaPay`                                                                   |
-|   2 | Contact email                             | `[applicant required]`                                                      |
-|   3 | Public team-introduction link             | `[applicant identity and career details required]`                          |
-|   4 | Motivation, 1–500 characters              | Use **Motivation** below                                                    |
-|   5 | One primary track                         | **Mass Adoption**                                                           |
-|   6 | One-line project summary, 1–50 characters | Use **One line** below                                                      |
-|   7 | Public pitch-deck link                    | `[upload completed deck and add URL]`                                       |
-|   8 | Working MVP or demo-video URL             | <https://giwapay-mvp.eomyunsig.chatgpt.site> and, if recorded, the demo URL |
-|   9 | Verified GIWA testnet contract            | `[GIWA Explorer verified contract URL required]`                            |
-|  10 | Public technical document or one-pager    | Public repository README and the technical documents linked above           |
-|  11 | Additional support, optional              | Use **Additional support** below                                            |
-|  12 | Message to the GIWA team, optional        | Use **Message to GIWA** below                                               |
+| Working # | Provisional field               | Draft submission value                                                                            |
+| --------: | ------------------------------- | ------------------------------------------------------------------------------------------------- |
+|         1 | Team name                       | `GiwaPay`                                                                                         |
+|         2 | Contact email                   | `[applicant required if requested]`                                                               |
+|         3 | Public team introduction        | `[applicant identity and career details required if requested]`                                   |
+|         4 | Motivation                      | Use **Motivation** below, shortened to the live limit                                             |
+|         5 | Track                           | **Mass Adoption** as the primary editorial choice                                                 |
+|         6 | One-line project summary        | Use **One line** below, shortened if needed                                                       |
+|         7 | Public pitch-deck link          | <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/pitch/GiwaPay-GASOK-Pitch-Deck.pdf>    |
+|         8 | Working MVP or demo-video URL   | **`[PENDING — provide a truthful executable-flow demo if the live form requests this evidence]`** |
+|         9 | Verified GIWA testnet contract  | `[GIWA Explorer verified contract URL required if requested]`                                     |
+|        10 | Technical document or one-pager | <https://github.com/eomyunsig-debug/giwapay/blob/main/docs/gasok-one-pager.md>                    |
+|        11 | Additional support              | Use **Additional support** below if the live form requests it                                     |
+|        12 | Message to the GIWA team        | Use **Message to GIWA** below if the live form requests it                                        |
 
-The working transcription also records consent to personal-data processing and
-to provide codebase access in a later review. The applicant must verify the
-exact live wording and make both decisions personally. Do not treat the
-transcribed consent or disqualification wording as an official quotation.
+The applicant must personally review the exact live consent language and decide
+whether to accept it. Independently of the form wording, keep the MVP, video,
+contract, source commit, and written claims aligned so reviewers are not shown
+conflicting evidence.
 
 ## Selected track
 
@@ -81,16 +86,17 @@ this review could not independently verify the live form's selection mechanics.
 Mass Adoption matches the core user story: a familiar payment link hides chain
 mechanics while preserving self-custody, explicit limits, and verifiable
 settlement. GIWA-native infrastructure is the reason the product is credible,
-not a reason to claim a second selection that the form may not accept. Do not
-submit duplicate forms for the same project without written program guidance.
+not a reason to file a duplicate application. Do not submit the same project
+twice without written program guidance.
 
 ## Copy-ready answers
 
 ### One line
 
-> 고객은 원하는 자산으로, 판매자는 정확한 금액으로 정산받는 GIWA 결제
+> 고객은 지원 자산으로, 판매자는 정한 자산·정확한 금액으로 받는 GIWA 결제
 
-This is 40 Unicode characters, within the form's 50-character limit.
+This is 43 Unicode characters and matches the configured/allowlisted asset
+boundary. Confirm the live form's current limit before pasting it.
 
 ### One line in English
 
@@ -240,13 +246,13 @@ Full proposal:
 
 Do not invent team information. Complete these fields in the live form:
 
-- Applicant name: `[required]`
-- Email and phone: `[required]`
-- Individual or legal entity: `[required]`
-- Current role and relevant history: `[required]`
+- Applicant name: `[provide if requested]`
+- Contact details: `[provide only the fields requested by the live form]`
+- Individual or legal entity: `[provide if requested]`
+- Current role and relevant history: `[provide if requested]`
 - Team members and responsibilities: `[none confirmed in repository]`
 - Advisor or merchant references: `[none confirmed in repository]`
-- Availability through October 2026: `[required]`
+- Availability through October 2026: `[provide if requested]`
 
 ## Track-specific opening variants
 
@@ -278,12 +284,12 @@ Use this table to keep the application and demo accurate.
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Implemented     | GIWA Sepolia chain configuration; non-custodial router; direct token path; labelled mock exact-output adapter; EIP-712 and ERC-1271; canonical indexer; reorg rollback; verified receipts; post-merge CI |
 | Proposed        | Official-wallet host handoff; in-app single-confirmation surface; Dojang/up.id address identity signal with separate merchant verification; production asset and DEX selection; testnet merchant pilots  |
-| Required gate   | Public GIWA Sepolia deployment with at least one contract verified in GIWA Explorer; public pitch deck; public team introduction; recorded demo if the showcase alone cannot evidence the core flow      |
+| Required gate   | Public GIWA Sepolia deployment with at least one contract verified in GIWA Explorer; applicant-approved public team introduction; truthful executable-flow demo if requested by the live form            |
 | Not implemented | GIWA mainnet deployment; public GIWA Sepolia deployment manifest; official GIWA Wallet SDK; Upbit account or exchange integration; fiat custody/off-ramp; production KRW stablecoin; production DEX      |
 
 ## Final submission checklist
 
-- [ ] Verify the provisional field map, required/optional status, character
+- [ ] Re-check the form map, required/optional status, character
       limits, link requirements, and consent wording in the live form.
 - [x] Prepare **Mass Adoption** as the primary editorial choice; verify the live
       form's track mechanics before submission.
@@ -291,13 +297,16 @@ Use this table to keep the application and demo accurate.
       placeholders in a public team-introduction file.
 - [ ] Deploy to GIWA Sepolia and verify at least one submitted contract in GIWA
       Explorer. Do not paste an unverified address.
-- [ ] Upload the completed pitch deck with public-link access.
-- [ ] Record and upload the two-minute demo if the public showcase does not show
-      the implemented core flow; add only the actual URL.
+- [x] Prepare the public pitch deck and editable source.
+- [ ] Replace the pitch-deck and one-pager links with the final immutable
+      artifact-commit URLs.
+- [ ] Record and upload a truthful executable-flow demo if the live form asks
+      for working MVP or demo evidence; add only the actual URL.
 - [ ] Use the merged `main` commit and the successful post-merge CI link.
 - [ ] Keep Mock assets, local Anvil, and non-live public showcase labels visible.
 - [ ] Re-check every URL in a signed-out browser.
-- [ ] Personally accept or decline the two required consent items.
+- [ ] Personally review and accept or decline every consent item shown by the
+      live form.
 - [ ] Submit once, save the confirmation page or email, and record its timestamp
       before **2026-07-31**.
 
